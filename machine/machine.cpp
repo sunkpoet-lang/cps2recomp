@@ -126,9 +126,10 @@ void Machine::Reset() {
     }
     cpu.Reset(true);
     if (m_cps1) {
-        // (a CPS-1's Z80 is never held: it runs from the start)
-        m_soundRunning = true;
-        if (soundDriver && soundSide != SoundSide::Z80) {
+        // (a CPS-1's Z80 is never held: it runs from the start; the classic CPS-1's stays stopped, with no chips for it
+        // to play on yet)
+        m_soundRunning = m_roms.board.qsound;
+        if (m_roms.board.qsound && soundDriver && soundSide != SoundSide::Z80) {
             soundDriver->shadow = soundSide == SoundSide::Check;
             soundDriver->Reset();
         }
@@ -669,6 +670,18 @@ uint16_t Machine::ReadCps1(uint32_t address) {
     if (address >= 0xF00000 && address < 0xF10000) {
         const size_t at = (address - 0xF00000) / 2;
         return static_cast<uint16_t>(0xFF00 | (at < m_roms.soundProgram.size() ? m_roms.soundProgram[at] : 0xFF));
+    }
+    if (address == 0x800176 && !m_roms.board.qsound) {
+        // The classic CPS-1's kicks (Street Fighter II's three more buttons): player 1's in bits 0-2, player 2's in
+        // bits 4-6, light to hard, pressed as 0
+        auto kicks = [](uint16_t p) { return static_cast<unsigned>((p >> 7) & 7); };
+        return static_cast<uint16_t>(~(kicks(p1) | (kicks(p2) << 4)));
+    }
+    if ((address == 0x800144 || address == 0x800146) && !m_roms.board.qsound) {
+        // The classic CPS-1's CPS-B-21 multiplies the words written at 800140 and 800142 (Street Fighter II looks up
+        // its jump tables with it): the product's low word, then its high one
+        const uint32_t product = static_cast<uint32_t>(cpsB[0]) * cpsB[1];
+        return static_cast<uint16_t>(address == 0x800144 ? product : product >> 16);
     }
     if (address >= 0x800140 && address < 0x800180) {
         return 0xFFFF; // (this CPS-B has no multiplier or ID to read)

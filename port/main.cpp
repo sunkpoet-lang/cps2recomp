@@ -188,8 +188,15 @@ bool Port::Init(std::string &error) {
 #ifndef GAME_KEY
 #define GAME_KEY ""
 #endif
-    const RomList list = ParseRomList(GAME_PROGRAM, GAME_GRAPHICS, GAME_SOUND_PROGRAM, GAME_SAMPLES, GAME_KEY, GAME_ROM_SET, GAME_ROM_PARENT,
-                                      GAME_BOARD, GAME_CPS_B);
+#ifndef GAME_GFX_MAP
+#define GAME_GFX_MAP ""
+#endif
+    RomList list = ParseRomList(GAME_PROGRAM, GAME_GRAPHICS, GAME_SOUND_PROGRAM, GAME_SAMPLES, GAME_KEY, GAME_ROM_SET, GAME_ROM_PARENT,
+                                GAME_BOARD, GAME_CPS_B);
+    if (!ParseGfxMap(GAME_GFX_MAP, list.board)) {
+        error = "game.cfg's gfx_map cannot be read";
+        return false;
+    }
     if (!LoadRomSet(opt.romPath, list, roms, error)) {
         return false;
     }
