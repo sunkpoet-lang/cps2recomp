@@ -64,4 +64,10 @@ first request as a game begins (the attract mode asks for none) and is the same,
 board is set" unless chosen. The board reads them only as it starts, so a change takes effect after Reset (the menu's
 Reset, or the next time the game opens).
 
+**The Cheats page** (the menu's and the launcher's), from game.cfg's `cheat_N` lines: writes to the work RAM before
+every frame while a cheat is on, only while a game is played. Infinite lives, infinite time, the armour (steel or gold,
+kept through hits: enemies cannot kill Arthur, a fall still does) and the weapon (lance, dagger, torch, axe, discus).
+Each can be switched any time; off, the game goes on as it was. The addresses were found here with RAM dumps, traces and
+pokes from a save state; game.cfg says how.
+
 **Next.** Features of its own.

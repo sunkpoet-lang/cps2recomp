@@ -70,4 +70,9 @@ cycles, as on the QSound boards). It costs about 15% of the speed without a wind
 
 **The Board page** (the in-game menu's, F1 or Esc, and the launcher's): the DIP switches by name, from game.cfg's `board_option_N` lines: difficulty (0 to 7), free play, continue, demo sound and two coins to start, each "As the board is set" unless chosen. The board reads them all the time, so a change applies at once, as the game next uses it.
 
+**The Cheats page** (the menu's and the launcher's), from game.cfg's `cheat_N` lines: writes to the work RAM before
+every frame while a cheat is on, while a round is fought. Infinite energy for each player, infinite time and one-hit
+knockouts (player 2). The bosses can be chosen in this game, so there is no cheat for them. Each can be switched any
+time; off, the game goes on as it was.
+
 **Next.** The DIP switches by name (free play, difficulty), and the features the other fighting games have.

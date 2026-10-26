@@ -29,6 +29,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <deque>
+#include <sstream>
 #include <filesystem>
 #include <set>
 #ifdef _WIN32
@@ -255,6 +256,202 @@ void ApplyBoardOptions(Machine &machine) {
     std::copy(dip, dip + 3, machine.dip);
 }
 
+// The cheats that game.cfg declares (cheat_1 to cheat_16): writes to the work RAM, made before every frame while the
+// cheat is on, on a "Cheats" page of the menu and the launcher. Each line is
+//   name | title | description | [when ADDR.s=VAL | ] choice: ADDR.s=VAL ADDR.s=VAL ... | choice: ...
+// (hex; s is b, w or l; "when ADDR.s!=VAL" too). A cheat with one choice (On) is switched on and off.
+namespace {
+    struct RamWrite {
+        uint32_t address = 0;
+        char size = 'b';
+        uint32_t value = 0;
+    };
+    struct Cheat {
+        std::string name, title, description;
+        bool when = false, whenNot = false;
+        RamWrite condition;
+        std::vector<std::string> names;
+        std::vector<std::vector<RamWrite>> writes;
+        std::vector<const char *> choices; // ("Off", then the names)
+    };
+    std::deque<Cheat> g_cheats; // (a deque: Feature keeps pointers into these strings)
+
+    // "ADDR.s=VAL" (or "!=" when `notEqual` may be given); false if it is not that, or not in the work RAM
+    bool ParseRamWrite(const std::string &text, RamWrite &write, bool *notEqual = nullptr) {
+        char *end;
+        write.address = static_cast<uint32_t>(strtoul(text.c_str(), &end, 16));
+        if (end == text.c_str() || end[0] != '.' || (end[1] != 'b' && end[1] != 'w' && end[1] != 'l')) {
+            return false;
+        }
+        write.size = end[1];
+        const char *rest = end + 2;
+        if (notEqual) {
+            *notEqual = rest[0] == '!';
+            if (*notEqual) {
+                rest++;
+            }
+        }
+        if (rest[0] != '=' || !rest[1]) {
+            return false;
+        }
+        const unsigned long long value = strtoull(rest + 1, &end, 16);
+        const unsigned long long limit = write.size == 'b' ? 0xFF : write.size == 'w' ? 0xFFFF : 0xFFFFFFFFull;
+        const int bytes = write.size == 'b' ? 1 : write.size == 'w' ? 2 : 4;
+        if (*end || value > limit || write.address < 0xFF0000 || write.address + bytes - 1 > 0xFFFFFF ||
+            (bytes > 1 && (write.address & 1))) {
+            return false;
+        }
+        write.value = static_cast<uint32_t>(value);
+        return true;
+    }
+
+    bool ParseCheat(const char *text, Cheat &cheat, std::string &error) {
+        std::vector<std::string> fields;
+        const std::string line = text;
+        for (size_t at = 0; at <= line.size();) {
+            const size_t bar = std::min(line.find('|', at), line.size());
+            fields.push_back(Trimmed(line.substr(at, bar - at)));
+            at = bar + 1;
+        }
+        cheat.name = fields[0];
+        const std::string what = "game.cfg's cheat " + (cheat.name.empty() ? std::string("\"") + text + "\"" : cheat.name);
+        if (fields.size() < 4 || cheat.name.empty()) {
+            error = what + ": name | title | description | [when ADDR.s=VAL |] choice: ADDR.s=VAL ...";
+            return false;
+        }
+        cheat.title = fields[1];
+        cheat.description = fields[2];
+        size_t n = 3;
+        if (fields[n].rfind("when ", 0) == 0) {
+            cheat.when = true;
+            if (!ParseRamWrite(Trimmed(fields[n].substr(5)), cheat.condition, &cheat.whenNot)) {
+                error = what + ": the condition \"" + fields[n] + "\" is not when ADDR.s=VAL (or !=) in the work RAM, FF0000-FFFFFF";
+                return false;
+            }
+            n++;
+        }
+        if (n >= fields.size()) {
+            error = what + ": it has no choice (choice: ADDR.s=VAL ...)";
+            return false;
+        }
+        for (; n < fields.size(); n++) {
+            const size_t colon = fields[n].find(':');
+            std::vector<RamWrite> writes;
+            std::istringstream words(colon == std::string::npos ? std::string() : fields[n].substr(colon + 1));
+            std::string word;
+            while (words >> word) {
+                RamWrite write;
+                if (!ParseRamWrite(word, write)) {
+                    error = what + ": \"" + word + "\" is not ADDR.s=VAL (s: b, w or l; a word or long at an even address) in the work RAM, FF0000-FFFFFF";
+                    return false;
+                }
+                writes.push_back(write);
+            }
+            if (colon == std::string::npos || colon == 0 || writes.empty()) {
+                error = what + ": the choice \"" + fields[n] + "\" is not name: ADDR.s=VAL ...";
+                return false;
+            }
+            cheat.names.push_back(Trimmed(fields[n].substr(0, colon)));
+            cheat.writes.push_back(writes);
+        }
+        return true;
+    }
+
+    uint32_t RamValue(const RamWrite &at) {
+        return at.size == 'b' ? Ram8(at.address) : at.size == 'w' ? Ram16(at.address) : Ram32(at.address);
+    }
+} // namespace
+
+// Reads game.cfg's cheats (none: no Cheats page); false, with what is wrong, if one cannot be read
+bool ReadCheats(std::string &error) {
+    static const char *const kTexts[] = {
+#ifdef GAME_CHEAT_1
+        GAME_CHEAT_1,
+#endif
+#ifdef GAME_CHEAT_2
+        GAME_CHEAT_2,
+#endif
+#ifdef GAME_CHEAT_3
+        GAME_CHEAT_3,
+#endif
+#ifdef GAME_CHEAT_4
+        GAME_CHEAT_4,
+#endif
+#ifdef GAME_CHEAT_5
+        GAME_CHEAT_5,
+#endif
+#ifdef GAME_CHEAT_6
+        GAME_CHEAT_6,
+#endif
+#ifdef GAME_CHEAT_7
+        GAME_CHEAT_7,
+#endif
+#ifdef GAME_CHEAT_8
+        GAME_CHEAT_8,
+#endif
+#ifdef GAME_CHEAT_9
+        GAME_CHEAT_9,
+#endif
+#ifdef GAME_CHEAT_10
+        GAME_CHEAT_10,
+#endif
+#ifdef GAME_CHEAT_11
+        GAME_CHEAT_11,
+#endif
+#ifdef GAME_CHEAT_12
+        GAME_CHEAT_12,
+#endif
+#ifdef GAME_CHEAT_13
+        GAME_CHEAT_13,
+#endif
+#ifdef GAME_CHEAT_14
+        GAME_CHEAT_14,
+#endif
+#ifdef GAME_CHEAT_15
+        GAME_CHEAT_15,
+#endif
+#ifdef GAME_CHEAT_16
+        GAME_CHEAT_16,
+#endif
+        nullptr};
+    g_cheats.clear();
+    for (const char *const *text = kTexts; *text; text++) {
+        Cheat &cheat = g_cheats.emplace_back();
+        if (!ParseCheat(*text, cheat, error)) {
+            g_cheats.clear();
+            return false;
+        }
+        cheat.choices.push_back("Off");
+        for (const std::string &name : cheat.names) {
+            cheat.choices.push_back(name.c_str());
+        }
+    }
+    return true;
+}
+
+// The cheats that are on, their writes made (while their condition holds): before every frame the game runs, run-ahead's
+// too
+void ApplyCheats() {
+    for (const Cheat &cheat : g_cheats) {
+        const int choice = FeatureValue(cheat.name.c_str());
+        if (choice <= 0 || choice > static_cast<int>(cheat.writes.size())) {
+            continue;
+        }
+        if (cheat.when && (RamValue(cheat.condition) == cheat.condition.value) == cheat.whenNot) {
+            continue;
+        }
+        for (const RamWrite &write : cheat.writes[choice - 1]) {
+            if (write.size == 'b') {
+                SetRam8(write.address, static_cast<uint8_t>(write.value));
+            } else if (write.size == 'w') {
+                SetRam16(write.address, static_cast<uint16_t>(write.value));
+            } else {
+                SetRam32(write.address, write.value);
+            }
+        }
+    }
+}
+
 // Every game's features that come from the port itself (after the game's own: RegisterGame), for the game and
 // for the list the launcher asks for (--list-features)
 void RegisterPortFeatures() {
@@ -263,6 +460,16 @@ void RegisterPortFeatures() {
         TheGame().pages.push_back({"Board", "", "The board's own settings, its DIP switches: each as the board is set unless chosen here."});
         for (const BoardOption &option : g_boardOptions) {
             TheGame().features.push_back({option.name.c_str(), "Board", option.title.c_str(), option.description.c_str(), kFeatureOwn, option.choices});
+        }
+    }
+    // (the cheats from game.cfg: ReadCheats; on the game's own Cheats page, if its sources have one)
+    if (!g_cheats.empty()) {
+        Game &game = TheGame();
+        if (std::none_of(game.pages.begin(), game.pages.end(), [](const Page &page) { return !strcmp(page.name, "Cheats"); })) {
+            game.pages.push_back({"Cheats", "", "Changes to the game's memory, for trying things out: each off unless chosen, and they can be switched any time."});
+        }
+        for (const Cheat &cheat : g_cheats) {
+            game.features.push_back({cheat.name.c_str(), "Cheats", cheat.title.c_str(), cheat.description.c_str(), kFeatureOwn, cheat.choices});
         }
     }
     // (run_ahead: Port::RunAhead)
@@ -400,7 +607,7 @@ bool Port::Init(std::string &error) {
     RegisterGame();
     machine->cpu.pointerFrom = PointerLoads(machine->cpu.extraLow, machine->cpu.extraHigh);
     machine->cpu.keepHistory = getenv("CPS2RECOMP_PC_HISTORY") != nullptr;
-    if (!ReadBoardOptions(error)) {
+    if (!ReadBoardOptions(error) || !ReadCheats(error)) {
         return false;
     }
     RegisterPortFeatures();
@@ -1044,6 +1251,7 @@ void Port::RunAhead() {
     SetRunningAhead(true);
     for (int n = 0; n < ahead; n++) {
         memcpy(machine->players, held, sizeof(held));
+        ApplyCheats();
         if (TheGame().beforeFrame) {
             TheGame().beforeFrame(*machine);
         }
@@ -1165,6 +1373,7 @@ void Port::RunFrame() {
         fprintf(stderr, "%s\n", error.c_str());
     }
     ApplyBoardOptions(*machine);
+    ApplyCheats();
     if (TheGame().beforeFrame) {
         TheGame().beforeFrame(*machine);
     }
@@ -1442,7 +1651,7 @@ bool ParseArgs(int argc, char **argv, port::Options &o) {
             // session, switched in the game's menu only, are not in it)
             RegisterGame();
             std::string boardError;
-            if (!port::ReadBoardOptions(boardError)) {
+            if (!port::ReadBoardOptions(boardError) || !port::ReadCheats(boardError)) {
                 fprintf(stderr, "%s\n", boardError.c_str());
                 exit(1);
             }
