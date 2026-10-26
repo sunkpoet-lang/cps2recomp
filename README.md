@@ -109,7 +109,8 @@ the same way. On a small screen, or with large text, the launcher closes up to f
 scrolls, and each row's buttons under its words.
 
 While playing, Esc or `F1` (on a gamepad, the left stick's click, or Start and Select together) opens the
-in-game menu. Only the menu's "Quit game" row (or closing the window) ends the game.
+in-game menu. Only the menu's "Quit game" row (or closing the window) ends the game. `F12` switches between a
+[custom soundtrack](#a-custom-soundtrack) and the board's music.
 
 macOS: the app is not notarized, so the first time, right-click it and choose Open.
 Linux: unpack the archive anywhere and run `cps2recomp-launcher`.
@@ -188,6 +189,12 @@ That is all it takes: **a folder of music plays as a playlist**, in place of all
 another in their names' order (`2 ...` before `10 ...`), and from the first again after the last. Choose **On,
 shuffled** for a random order.
 
+While playing, `F12` switches between your music and the board's at once, in the middle of a song: on, the board's
+music stops and your file plays from where the game is in the song; off, the board plays the song again from its
+start. A note over the picture says which is playing for a moment ("Musica: Arreglada" or "Musica: Arcade"). `F12`
+switches the same setting as the menu, back to the choice it had (in order or shuffled). Without a press the game
+plays exactly as before; a press changes only what the sound side plays.
+
 **To replace particular songs** instead, name each file after the piece of music it replaces: `ryu.flac`,
 `player_select.ogg`, `ken_ending.mp3`. The game writes `songs.txt` into the folder, with every piece of its music
 by name and number and what it is (Street Fighter Alpha 2 has 59: each character's theme, each ending, the staff
@@ -205,7 +212,20 @@ loop = 0:12.5 - 2:47.25      ; the part that repeats: start - end (minutes:secon
 volume = 90
 ```
 
-A song's file repeats whole unless it says otherwise: by `loop` in `soundtrack.ini`, `loop = no` to play it once, or the
+`start` has a song begin further into its file (minutes:seconds, or seconds), so one file can hold two songs: a
+stage's tune and its later version, say, one after the other on a disc:
+
+```ini
+[ryu]
+file = 03 Track 3.mp3
+loop = 0 - 60.43             ; the tune, and never on into the later version
+
+[ryu_later]
+file = 03 Track 3.mp3
+start = 60.43                ; from there, and from there again each time round
+```
+
+A song's file repeats whole (or from its `start`) unless it says otherwise: by `loop` in `soundtrack.ini`, `loop = no` to play it once, or the
 loop tags many soundtrack packs have (`LOOPSTART`, with `LOOPEND` or `LOOPLENGTH`, in samples). The music the board
 plays once (a fanfare, the versus screen, a game over) is played once. The music keeps the game's time: pausing,
 the menu, slow motion, a save state and run-ahead leave it where the game is (a playlist plays on, and waits only

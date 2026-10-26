@@ -224,6 +224,8 @@ int RunWindowed(Port &port) {
                 } else if (ev.key.scancode == SDL_SCANCODE_F11 ||
                            (ev.key.scancode == SDL_SCANCODE_RETURN && (ev.key.mod & SDL_KMOD_ALT))) {
                     SDL_SetWindowFullscreen(window, !(SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN));
+                } else if (ev.key.scancode == SDL_SCANCODE_F12 && !ev.key.repeat) {
+                    port.ToggleSoundtrack(true); // the custom soundtrack or the board's music, at once
                 }
                 break;
             case SDL_EVENT_GAMEPAD_BUTTON_DOWN:

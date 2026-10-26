@@ -125,6 +125,16 @@ struct Port {
     int soundtrackValue = 0; // (the feature's choice: 1 on, 2 on with the playlist shuffled)
     std::string SoundtrackFolder() const;
     void SoundtrackFollow(); // (each frame: the feature switched on or off in the menu)
+    // F12 (and the test key 'm'): the custom soundtrack switched off, or on again as it was, and heard at once: on,
+    // the board's music stops and the file starts where the game is in the song; off, the board is asked for the
+    // song again, from its start. Only the sound side hears of it, never the game. `notice`: said over the picture
+    void ToggleSoundtrack(bool notice);
+    int soundtrackLastOn = 1;          // (the feature's choice the toggle switches back on to)
+    uint8_t soundRequest[16] = {};     // a request for the sound side waiting for the last to be taken ...
+    int soundRequestTries = 0;         // ... for so many frames more
+    void AskSound(const uint8_t request[16]);
+    std::string notice;                // said at the top of the picture ...
+    uint64_t noticeUntil = 0;          // ... until this tick
     // One frame: input (window, movie or made up), the machine, the per-frame outputs
     void RunFrame();
     void RunAhead();
