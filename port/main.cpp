@@ -28,6 +28,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <filesystem>
 #include <set>
 #ifdef _WIN32
@@ -120,9 +121,150 @@ namespace {
     }
 } // namespace
 
+// The board's settings that game.cfg declares (board_option_1 to board_option_12): choices of the board's DIP switches,
+// on a "Board" page of the menu and the launcher. Each line is
+//   name | title | bank:low-high | description | choice=value | choice=value ...
+// (the bank A, B or C, the bits low to high, each choice's value as the bits hold it). "As the board is set", the
+// first choice, leaves the bits as game.cfg's dip has them.
+namespace {
+    struct BoardOption {
+        std::string name, title, description;
+        int bank = 0, low = 0, high = 0;
+        std::vector<std::string> names;
+        std::vector<uint8_t> values;
+        std::vector<const char *> choices; // ("As the board is set", then the names)
+    };
+    // (a deque: Feature keeps pointers into these strings, which must not move)
+    std::deque<BoardOption> g_boardOptions;
+
+    std::string Trimmed(const std::string &s) {
+        const size_t a = s.find_first_not_of(" \t"), b = s.find_last_not_of(" \t");
+        return a == std::string::npos ? "" : s.substr(a, b - a + 1);
+    }
+
+    bool ParseBoardOption(const char *text, BoardOption &option, std::string &error) {
+        std::vector<std::string> fields;
+        std::string line = text;
+        for (size_t at = 0; at <= line.size();) {
+            const size_t bar = std::min(line.find('|', at), line.size());
+            fields.push_back(Trimmed(line.substr(at, bar - at)));
+            at = bar + 1;
+        }
+        option.name = fields[0];
+        const std::string what = "game.cfg's board option " + (option.name.empty() ? std::string("\"") + text + "\"" : option.name);
+        if (fields.size() < 6 || option.name.empty()) {
+            error = what + ": name | title | bank:low-high | description | at least one choice=value";
+            return false;
+        }
+        option.title = fields[1];
+        option.description = fields[3];
+        char bank;
+        const int got = sscanf(fields[2].c_str(), "%c:%d-%d", &bank, &option.low, &option.high);
+        if (got == 2) {
+            option.high = option.low; // (one bit: "C:6")
+        }
+        if (got < 2 || bank < 'A' || bank > 'C' ||
+            option.low < 0 || option.high > 7 || option.low > option.high) {
+            error = what + ": its bits are written A:0-2 or A:6 (bank A, B or C; bits 0 to 7, low to high)";
+            return false;
+        }
+        option.bank = bank - 'A';
+        const unsigned limit = 1u << (option.high - option.low + 1);
+        for (size_t n = 4; n < fields.size(); n++) {
+            const size_t eq = fields[n].rfind('=');
+            char *end = nullptr;
+            const unsigned long value = eq == std::string::npos ? 0 : strtoul(fields[n].c_str() + eq + 1, &end, 0);
+            if (eq == std::string::npos || eq == 0 || end == fields[n].c_str() + eq + 1 || *end || value >= limit) {
+                error = what + ": the choice \"" + fields[n] + "\" is not name=value, with a value its bits can hold";
+                return false;
+            }
+            option.names.push_back(Trimmed(fields[n].substr(0, eq)));
+            option.values.push_back(static_cast<uint8_t>(value));
+        }
+        return true;
+    }
+} // namespace
+
+// Reads game.cfg's board options (none: no Board page); false, with what is wrong, if one cannot be read
+bool ReadBoardOptions(std::string &error) {
+    static const char *const kTexts[] = {
+#ifdef GAME_BOARD_OPTION_1
+        GAME_BOARD_OPTION_1,
+#endif
+#ifdef GAME_BOARD_OPTION_2
+        GAME_BOARD_OPTION_2,
+#endif
+#ifdef GAME_BOARD_OPTION_3
+        GAME_BOARD_OPTION_3,
+#endif
+#ifdef GAME_BOARD_OPTION_4
+        GAME_BOARD_OPTION_4,
+#endif
+#ifdef GAME_BOARD_OPTION_5
+        GAME_BOARD_OPTION_5,
+#endif
+#ifdef GAME_BOARD_OPTION_6
+        GAME_BOARD_OPTION_6,
+#endif
+#ifdef GAME_BOARD_OPTION_7
+        GAME_BOARD_OPTION_7,
+#endif
+#ifdef GAME_BOARD_OPTION_8
+        GAME_BOARD_OPTION_8,
+#endif
+#ifdef GAME_BOARD_OPTION_9
+        GAME_BOARD_OPTION_9,
+#endif
+#ifdef GAME_BOARD_OPTION_10
+        GAME_BOARD_OPTION_10,
+#endif
+#ifdef GAME_BOARD_OPTION_11
+        GAME_BOARD_OPTION_11,
+#endif
+#ifdef GAME_BOARD_OPTION_12
+        GAME_BOARD_OPTION_12,
+#endif
+        nullptr};
+    g_boardOptions.clear();
+    for (const char *const *text = kTexts; *text; text++) {
+        BoardOption &option = g_boardOptions.emplace_back();
+        if (!ParseBoardOption(*text, option, error)) {
+            g_boardOptions.clear();
+            return false;
+        }
+        option.choices.push_back("As the board is set");
+        for (const std::string &name : option.names) {
+            option.choices.push_back(name.c_str());
+        }
+    }
+    return true;
+}
+
+// The DIP switches as the Board page's choices have them: the board's, with each chosen option's bits put in
+void ApplyBoardOptions(Machine &machine) {
+    uint8_t dip[3];
+    std::copy(machine.DipAsSet(), machine.DipAsSet() + 3, dip);
+    for (const BoardOption &option : g_boardOptions) {
+        const int choice = FeatureValue(option.name.c_str());
+        if (choice <= 0 || choice > static_cast<int>(option.values.size())) {
+            continue;
+        }
+        const uint8_t mask = static_cast<uint8_t>(((1u << (option.high - option.low + 1)) - 1) << option.low);
+        dip[option.bank] = static_cast<uint8_t>((dip[option.bank] & ~mask) | ((option.values[choice - 1] << option.low) & mask));
+    }
+    std::copy(dip, dip + 3, machine.dip);
+}
+
 // Every game's features that come from the port itself (after the game's own: RegisterGame), for the game and
 // for the list the launcher asks for (--list-features)
 void RegisterPortFeatures() {
+    // (the board's settings from game.cfg: ReadBoardOptions)
+    if (!g_boardOptions.empty()) {
+        TheGame().pages.push_back({"Board", "", "The board's own settings, its DIP switches: each as the board is set unless chosen here."});
+        for (const BoardOption &option : g_boardOptions) {
+            TheGame().features.push_back({option.name.c_str(), "Board", option.title.c_str(), option.description.c_str(), kFeatureOwn, option.choices});
+        }
+    }
     // (run_ahead: Port::RunAhead)
     TheGame().features.push_back({"run_ahead", "Game", "Run-ahead",
                                   "Shows the game a frame or two further on than it is, so that what you press is seen sooner than "
@@ -258,6 +400,9 @@ bool Port::Init(std::string &error) {
     RegisterGame();
     machine->cpu.pointerFrom = PointerLoads(machine->cpu.extraLow, machine->cpu.extraHigh);
     machine->cpu.keepHistory = getenv("CPS2RECOMP_PC_HISTORY") != nullptr;
+    if (!ReadBoardOptions(error)) {
+        return false;
+    }
     RegisterPortFeatures();
     LoadFeatures(opt.settingsPath, opt.features);
     // The 68000 and the Z80 are run the same way; each falls back to its interpreter if the build has no
@@ -1019,6 +1164,7 @@ void Port::RunFrame() {
     if (AtFrame(opt.stateLoad, frame, path) && !LoadState(path, error)) {
         fprintf(stderr, "%s\n", error.c_str());
     }
+    ApplyBoardOptions(*machine);
     if (TheGame().beforeFrame) {
         TheGame().beforeFrame(*machine);
     }
@@ -1295,6 +1441,11 @@ bool ParseArgs(int argc, char **argv, port::Options &o) {
             // For the launcher: one optional feature per line (recomp-common/settings.h; the ones that last a
             // session, switched in the game's menu only, are not in it)
             RegisterGame();
+            std::string boardError;
+            if (!port::ReadBoardOptions(boardError)) {
+                fprintf(stderr, "%s\n", boardError.c_str());
+                exit(1);
+            }
             port::RegisterPortFeatures();
             std::vector<recomp::FeatureInfo> list = FeatureList();
             // (nor are the ones whose switch is on the launcher's first page: game.h, kFeatureFirstPage)

@@ -59,4 +59,9 @@ took for code. A run of 6,000 frames (the board's tests, the story, the first st
 his armour) ran nothing in the interpreter, at 551 frames a second without a window; its sound starts with the game's
 first request as a game begins (the attract mode asks for none) and is the same, byte for byte, with run-ahead.
 
-**Next.** The DIP switches by name in the menu (lives, difficulty), and features of its own.
+**The Board page** (the in-game menu's, F1 or Esc, and the launcher's): the DIP switches by name, from game.cfg's
+`board_option_N` lines: difficulty (1 to 8), lives (3 to 6), the bonus life, continue and demo sound, each "As the
+board is set" unless chosen. The board reads them only as it starts, so a change takes effect after Reset (the menu's
+Reset, or the next time the game opens).
+
+**Next.** Features of its own.

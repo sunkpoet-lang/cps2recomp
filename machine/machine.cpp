@@ -56,6 +56,7 @@ Machine::Machine(const RomSet &roms)
     sources.board = roms.board;
     video = Video(sources);
     eeprom.eightBit = m_cps1;
+    std::copy(std::begin(roms.board.dip), std::end(roms.board.dip), dip);
     if (m_cps1 && !roms.board.qsound) {
         m_classic = std::make_unique<Cps1Sound>(roms.samples.data(), roms.samples.size());
         m_logClassic = getenv("CPS2RECOMP_SOUND_COMMANDS") != nullptr;
@@ -682,7 +683,18 @@ uint16_t Machine::ReadCps1(uint32_t address) {
     if (address >= 0x80001A && address < 0x800020) {
         // The DIP switches, banks A, B and C in the high byte (game.cfg's dip; without it, all off: a CPS-1 with QSound
         // keeps its settings in the settings memory)
-        return static_cast<uint16_t>((m_roms.board.dip[(address - 0x80001A) / 2] << 8) | 0xFF);
+        const int bank = static_cast<int>(address - 0x80001A) / 2;
+        // (CPS2RECOMP_DIP_LOG: each bank's value as the game reads it, when it changes; =all: the first read of each
+        // frame too, to see when the game looks)
+        static const char *const log = getenv("CPS2RECOMP_DIP_LOG");
+        static int logged[3] = {-1, -1, -1};
+        static uint64_t loggedFrame[3] = {~0ull, ~0ull, ~0ull};
+        if (log && (logged[bank] != dip[bank] || (!strcmp(log, "all") && loggedFrame[bank] != frame))) {
+            logged[bank] = dip[bank];
+            loggedFrame[bank] = frame;
+            fprintf(stderr, "dip %c read %02X (frame %llu)\n", 'A' + bank, dip[bank], static_cast<unsigned long long>(frame));
+        }
+        return static_cast<uint16_t>((dip[bank] << 8) | 0xFF);
     }
     if (address == 0xF1C000 || address == 0xF1C002) {
         const uint16_t p = players[address == 0xF1C000 ? 2 : 3];

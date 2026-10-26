@@ -50,4 +50,6 @@ Champion Edition's (its README says how it is made), and plays the same way.
 instructions (91.6%) on 970 anchors and moved 1,110 of its entry points: nearly the same program, so the features
 written for one would serve the other (`sources = sf2ce` with a `family.h`).
 
-**The DIP switches** are as the boards left the factory (`dip` in game.cfg, `FF FC 9F`): difficulty 4 (normal), continues allowed, the demonstrations' sound. Before, the port read them all off: the easiest difficulty and no continues.
+**The DIP switches** are as the boards left the factory (`dip` in game.cfg, `FF FC 9F`): difficulty 3 (normal), continues allowed, the demonstrations' sound. Before, the port read them all off: the easiest difficulty and no continues.
+
+**The Board page** (the in-game menu's, F1 or Esc, and the launcher's): the DIP switches by name, from game.cfg's `board_option_N` lines: difficulty (0 to 7), free play, continue, demo sound and two coins to start, each "As the board is set" unless chosen. The board reads them all the time, so a change applies at once, as the game next uses it.
