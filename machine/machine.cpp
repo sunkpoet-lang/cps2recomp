@@ -793,6 +793,15 @@ void Machine::Write(uint16_t address, uint8_t value) {
     }
 }
 
+bool Machine::LeaveSoundRequest(const uint8_t request[16]) {
+    if (soundRam[0x00F] != 0xFF) {
+        return false;
+    }
+    memcpy(soundRam, request, 15);
+    soundRam[0x00F] = request[15];
+    return true;
+}
+
 void Machine::Serialize(Archive &ar) {
     ar.Mark(0x4D414348);
     cpu.Serialize(ar);

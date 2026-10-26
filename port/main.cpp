@@ -80,7 +80,7 @@ bool Movie::Save(const std::string &path) const {
 }
 
 namespace {
-    constexpr uint32_t kStateVersion = 7; // (5: the 68000's wait kept; 6: the custom soundtrack's place; 7: the board timing's palette copy)
+    constexpr uint32_t kStateVersion = 8; // (5: the 68000's wait kept; 6: the custom soundtrack's place; 7: the board timing's palette copy; 8: the last music asked for)
 
     bool ReadFile(const std::string &path, std::vector<uint8_t> &data) {
         FILE *f = fopen(path.c_str(), "rb");
@@ -345,6 +345,55 @@ void Port::SoundtrackFollow() {
     }
 }
 
+void Port::AskSound(const uint8_t request[16]) {
+    soundRequestTries = 0;
+    if (!machine->LeaveSoundRequest(request)) {
+        // (the game's last request not yet taken: tried again before each of the next frames)
+        memcpy(soundRequest, request, sizeof(soundRequest));
+        soundRequestTries = 30;
+    }
+}
+
+void Port::ToggleSoundtrack(bool say) {
+    if (!TheGame().songCount) {
+        return;
+    }
+    Soundtrack &tap = machine->soundtrack;
+    const int was = FeatureValue("custom_soundtrack");
+    if (was > 0) {
+        soundtrackLastOn = was;
+    }
+    const int32_t playing = tap.state.song; // (the song a file is playing for, if any)
+    SetFeatureValue("custom_soundtrack", was > 0 ? 0 : soundtrackLastOn);
+    SoundtrackFollow();
+    const char *text;
+    if (was > 0) {
+        // Off: the board plays the music the file was playing, from its start
+        if (playing >= 0 && tap.last.song == playing) {
+            AskSound(tap.last.request);
+        }
+        text = "Musica: Arcade";
+    } else if (!soundtrackOn || !soundtrack.Any()) {
+        text = "Musica: sin archivos";
+    } else {
+        // On: the board's music stops, and the file plays from where the game is in the song
+        if (tap.last.song >= 0 && tap.Replaced(static_cast<uint16_t>(tap.last.song))) {
+            static const uint8_t stop[16] = {0xFF, 0x05};
+            AskSound(stop);
+            tap.state.song = tap.last.song;
+            tap.state.serial++;
+            tap.state.frames = tap.last.frames;
+            tap.state.level = tap.state.target = Soundtrack::kFull;
+            tap.state.step = 0;
+        }
+        text = "Musica: Arreglada";
+    }
+    if (say) {
+        notice = text;
+        noticeUntil = tick + 120;
+    }
+}
+
 // What the game's state comes to, for comparing runs: the CPU, its memory, the video and object memory, the
 // registers and the picture
 uint32_t Port::StateHash() const {
@@ -456,6 +505,7 @@ void Port::Key(char key, unsigned n) {
         break;
     case '-': menu.SetSlowBy(menu.SlowBy() * 2); break;
     case '=': menu.SetSlowBy(menu.SlowBy() / 2); break;
+    case 'm': ToggleSoundtrack(!opt.headless); break; // (tests: the music switched over, as F12 does)
     case 'k':
         for (size_t i = 0; i < TheGame().commands.size(); i++) {
             if (TheGame().commands[i].key == n && n != kKeyNone) {
@@ -539,6 +589,14 @@ void Port::Shown(std::vector<uint32_t> &pixels) const {
         const float x = (across - width) / 2, y = Video::kHeight - 11;
         canvas.Fill(x - 3, y - 2, width + 6, 12, {20, 22, 30, 220});
         canvas.Text(x, y, 1, 0, {255, 255, 255, 255}, status);
+    }
+    // The music just switched over (F12): said for a moment, under where fighting games keep their bars and timer
+    if (!notice.empty() && tick < noticeUntil) {
+        const recomp::text::Canvas canvas{pixels.data(), across, Video::kHeight};
+        const float width = recomp::text::TextWidth(notice.c_str(), 1);
+        const float x = (across - width) / 2, y = 52;
+        canvas.Fill(x - 3, y - 2, width + 6, 12, {20, 22, 30, 220});
+        canvas.Text(x, y, 1, 0, {255, 255, 255, 255}, notice.c_str());
     }
 }
 
@@ -857,6 +915,9 @@ void Port::RapidFire() {
 void Port::RunFrame() {
     ClearSpareRan();
     SoundtrackFollow();
+    if (soundRequestTries > 0 && (machine->LeaveSoundRequest(soundRequest) || --soundRequestTries == 0)) {
+        soundRequestTries = 0;
+    }
     machine->SetBoardTiming(FeatureOn("arcade_timing"));
     if (!opt.moviePlay.empty()) {
         auto it = playMovie.changes.find(frame);
@@ -1117,7 +1178,7 @@ void Usage() {
             "  --watch LOW[-HIGH]     report the 68000's writes to these addresses (hex), with who made them\n"
             "  --keys TICK:KEY,...    keys pressed at those ticks of the screen: p (stop/go), o (a frame on),\n"
             "                         - and = (speed), k1.. (the game's command keys), cNAME (a command),\n"
-            "                         fNAME=N (a feature set)\n"
+            "                         fNAME=N (a feature set), m (the music switched over, as F12 does)\n"
             "  --stats                speed, at the end\n"
             "  --audio-dump FILE      write the sound to a WAV file\n"
             "  --dump-program FILE    write the deciphered 68000 program and stop\n",

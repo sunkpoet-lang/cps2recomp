@@ -68,7 +68,7 @@ the same program ([how it was made](PROGRESS.md)).
   folder of music plays as a playlist (in order or shuffled), or files named for the game's songs replace those
   songs. The `songs.txt` the game writes in the soundtrack folder names the music: each stage's tune and its later
   version in a round, the final fight, the introduction and title, player select, versus, the winner's, the ranking,
-  Ryu's ending and the staff roll.
+  Ryu's ending and the staff roll. `F12` switches between it and the board's music at once, mid-song.
   [How →](../../README.md#a-custom-soundtrack)
 - Your ROM set is only ever read. Settings, save states and the board's settings memory go in your own user folder.
 
@@ -174,7 +174,8 @@ ROM set (drop `ssf2xjr1.zip` or its folder on the window, or choose the folder y
 away; the game's own program (`ssf2t`, beside the launcher) runs by itself too: `ssf2t --help` lists what it takes.
 
 While playing, Esc or `F1` (on a gamepad, the left stick's click, or Start and Select together) opens the in-game
-menu. Only the menu's "Quit game" row (or closing the window) ends the game.
+menu. Only the menu's "Quit game" row (or closing the window) ends the game. `F12` switches between a custom
+soundtrack and the board's music.
 
 ## Building from source
 
