@@ -32,8 +32,8 @@ their owners, used here only to say what the programs work with.
 
 | Game | ROM set | What it adds |
 | --- | --- | --- |
-| [**Street Fighter II: Champion Edition**](games/sf2ce/README.md) (1992, CPS-1) | `sf2ce` (World 920513) | A first port on the classic CPS-1 board, silent for now (no sound chips yet): the picture, the six buttons, the game as the board plays it |
-| [**Street Fighter II: Hyper Fighting**](games/sf2hf/README.md) (1992, CPS-1) | `sf2hf` (World 921209) | Champion Edition's first port for the faster revision, silent for now |
+| [**Street Fighter II: Champion Edition**](games/sf2ce/README.md) (1992, CPS-1) | `sf2ce` (World 920513) | A first port on the classic CPS-1 board: the picture, the six buttons, the game as the board plays it, and its sound (this fork: ymfm's YM2151) |
+| [**Street Fighter II: Hyper Fighting**](games/sf2hf/README.md) (1992, CPS-1) | `sf2hf` (World 921209) | Champion Edition's first port for the faster revision, with its sound (this fork) |
 | [**Super Street Fighter II Turbo**](games/ssf2t/README.md) (1994, *Super Street Fighter II X* in Japan) | `ssf2xjr1` (Japan 940223, the tournament revision) | A full training mode (hit boxes, frame data and a frame meter, input display, combo and stun readouts, a dummy that records, replays and guards), widescreen, survival, ring out, endless battle, a tag team battle (the CPU tagging as a person would), the stage and model viewers, Akuma and the old characters with no code, custom colours |
 | [**Hyper Street Fighter II**](games/hsf2/README.md) (2004, *The Anniversary Edition*) | `hsf2j` (Japan 040202) | A first port: the game as the board plays it, translated, with none of the other fighting games' features yet |
 | [**Street Fighter Alpha**](games/sfa/README.md) (1995) | `sfa` (Europe 950727) | A full training mode (hit boxes, frame data and a frame meter, input display, combo and stun readouts, a dummy that records, replays and guards), widescreen, survival, ring out, endless battle, the stage and model viewers, the hidden characters with no code, custom colours |

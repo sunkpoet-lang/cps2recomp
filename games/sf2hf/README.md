@@ -8,9 +8,10 @@ An unofficial native PC port of the arcade game *Street Fighter II′: Hyper Fig
 *Street Fighter II′ Turbo* in Japan) for macOS, Linux (Steam Deck included) and Windows, made by static
 recompilation.
 
-> **A first port, and silent.** Like [Champion Edition's](../sf2ce/README.md), whose graphics and sound it shares:
-> the game as the board plays it, translated, on the toolkit's classic CPS-1 board, with the picture and the six
-> buttons but no sound yet, and none of the other fighting games' features.
+> **A first port, with its sound (this fork).** Like [Champion Edition's](../sf2ce/README.md), whose graphics and sound
+> it shares: the game as the board plays it, translated, on the toolkit's classic CPS-1 board, with the picture, the
+> six buttons and the board's music, effects and voices (ymfm's YM2151: this fork only), but none of the other
+> fighting games' features.
 
 **No game files are included.** You need your own copy of the game: the arcade ROM set `sf2hf` (World, 921209), from
 a board you own. This project cannot help you get one.
@@ -42,7 +43,8 @@ A build of `sf2ce` first lets `tools/portmap.py` move its entry points to this p
 **Where it stands.** On Champion Edition's board (`cps1-classic`, the S9263B mapper, the CPS-B-21's multiplier and the
 kicks at 800176), with Champion Edition's entry points moved over, made-up play found 1,599 entries: 54,184
 instructions translated, 27 left to the interpreter, 17 of them data a guess took for code. A run of 6,000 frames
-(the title, Ryu against Ryu, then rounds against M. Bison on Ryu's stage) ran nothing in the interpreter, in silence.
+(the title, Ryu against Ryu, then rounds against M. Bison on Ryu's stage) ran nothing in the interpreter. The sound is
+Champion Edition's (its README says how it is made), and plays the same way.
 
 **How much of Champion Edition it shares.** `tools/portmap.py` placed 16,514 of Champion Edition's 18,036 walked
 instructions (91.6%) on 970 anchors and moved 1,110 of its entry points: nearly the same program, so the features

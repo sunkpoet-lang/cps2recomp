@@ -7,9 +7,11 @@
 An unofficial native PC port of the arcade game *Street Fighter II′: Champion Edition* (Capcom, 1992, CPS-1 board)
 for macOS, Linux (Steam Deck included) and Windows, made by static recompilation.
 
-> **A first port, and silent.** This is the game as the board plays it, translated, on the toolkit's classic CPS-1
-> board: the picture and the six buttons, but no sound yet (the board's YM2151 and OKI MSM6295 are still to be
-> written), and none of the features the other fighting games here have.
+> **A first port, with its sound (this fork).** This is the game as the board plays it, translated, on the toolkit's
+> classic CPS-1 board: the picture, the six buttons, and the board's music, effects and voices, but none of the
+> features the other fighting games here have. The sound plays the board's YM2151 with
+> [ymfm](https://github.com/aaronsgiles/ymfm) (BSD-3-Clause, `third_party/`): an emulator's code, which upstream does
+> not take (CONTRIBUTING.md, rule 4), so it lives only in this fork's `sf2-sonido` branch.
 
 **No game files are included.** You need your own copy of the game: the arcade ROM set `sf2ce` (World, 920513), from
 a board you own. This project cannot help you get one.
@@ -36,8 +38,8 @@ make GAME=sf2ce run
 
 ## Progress
 
-**Where it stands.** The board is `cps1-classic` (machine/romset.h): a CPS-1 with no QSound, its Z80 stopped until
-the toolkit has its sound chips. Three things the classic board needed and Cadillacs and Dinosaurs had not:
+**Where it stands.** The board is `cps1-classic` (machine/romset.h): a CPS-1 with no QSound. Three things the classic
+board needed and Cadillacs and Dinosaurs had not:
 
 - **The graphics mapper.** The PAL S9263B keeps the three scroll screens' tiles in its third bank (`gfx_map` in
   game.cfg, `GfxRange`); without it the backgrounds and the text were other tiles.
@@ -50,5 +52,18 @@ Made-up play found 1,288 entries: 51,653 instructions translated, 25 left to the
 took for code, all the code reached below 0C6232. A run of 6,000 frames (the title, player select, the versus
 screen, a whole round to its time over) ran 0.12% of its instructions in the interpreter, in silence.
 
-**Next.** The sound: the YM2151 and the OKI MSM6295, then the requests the 68000 leaves at 800180. Then the DIP
-switches by name (free play, difficulty), and the features the other fighting games have.
+**The sound** (this fork; `machine/cps1_sound.cpp`). The board's Z80 runs its program at 3.579545 MHz on its own map
+(ROM, a bank of it at 8000, RAM at D000, the YM2151 at F000, the OKI at F002, the bank at F004, the OKI's pin 7 at
+F006), and reads the 68000's requests from the two latches at 800181 and 800189 (F008 and F00A). Its interrupt is the
+YM2151's line (a level, `Z80::SetInterruptLine`), about 250 times a second from the chip's timers, which set the
+music's tempo. The YM2151 is ymfm's; the OKI MSM6295 (`sound/okim6295.cpp`) was written here from its data sheet:
+four voices of 4-bit ADPCM from the sample ROMs' table. The two are mixed to one speaker, as on the board, at the
+port's output rate, and kept in save states (version 9; older ones load, their sound starting afresh). DIP switch C6
+(the demonstrations' sound) is on, as the boards left the factory, so the attract mode plays its music.
+
+Checked without a window: 6,000 frames with no hang of the Z80, its interrupt steady, the requests read at F008, music
+and effects throughout a match, no sample clipped; the same sound with and without run-ahead, byte for byte; HSF2's
+picture and sound unchanged. The translated sound program and the interpreter sound alike (they differ by a few
+cycles, as on the QSound boards). It costs about 15% of the speed without a window (580 frames a second against 685).
+
+**Next.** The DIP switches by name (free play, difficulty), and the features the other fighting games have.

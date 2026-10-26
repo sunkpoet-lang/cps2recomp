@@ -56,6 +56,10 @@ Machine::Machine(const RomSet &roms)
     sources.board = roms.board;
     video = Video(sources);
     eeprom.eightBit = m_cps1;
+    if (m_cps1 && !roms.board.qsound) {
+        m_classic = std::make_unique<Cps1Sound>(roms.samples.data(), roms.samples.size());
+        m_logClassic = getenv("CPS2RECOMP_SOUND_COMMANDS") != nullptr;
+    }
     if (const char *layers = getenv("CPS2RECOMP_LAYERS")) {
         video.layerMask = static_cast<unsigned>(strtoul(layers, nullptr, 0)); // (bit 0 objects, 1-3 scroll screens)
     }
@@ -126,9 +130,15 @@ void Machine::Reset() {
     }
     cpu.Reset(true);
     if (m_cps1) {
-        // (a CPS-1's Z80 is never held: it runs from the start; the classic CPS-1's stays stopped, with no chips for it
-        // to play on yet)
-        m_soundRunning = m_roms.board.qsound;
+        // (a CPS-1's Z80 is never held: it runs from the start, the classic CPS-1's on its own chips)
+        m_soundRunning = true;
+        if (m_classic) {
+            m_classic->Reset();
+            memset(m_classicRam, 0, sizeof(m_classicRam));
+            memset(m_latch, 0, sizeof(m_latch));
+            m_classicFraction = 0;
+            soundCpu.SetInterruptLine(false);
+        }
         if (m_roms.board.qsound && soundDriver && soundSide != SoundSide::Z80) {
             soundDriver->shadow = soundSide == SoundSide::Check;
             soundDriver->Reset();
@@ -227,6 +237,10 @@ void Machine::RunLine() {
 // runs to the next thing due (its interrupt, 250 times a second; the chip's next sample; the end of the
 // stretch), a little past it, and then what has come due happens.
 void Machine::RunSound(int cycles) {
+    if (m_classic) {
+        RunClassicSound(cycles);
+        return;
+    }
     m_soundTime += static_cast<uint64_t>(cycles);
     while (soundCpu.cycles < m_soundTime) {
         const uint64_t next = std::min({m_soundTime, m_soundInterruptAt, m_sampleAt});
@@ -281,6 +295,22 @@ void Machine::RunSound(int cycles) {
     }
     if (soundSide == SoundSide::Check) {
         CompareSound();
+    }
+}
+
+// The classic CPS-1's Z80 and its chips for a stretch of time (`cycles` of 8 MHz). Its cycle count is the clock
+// here: it runs to the next thing its chips have due (a timer, a sample) and then that happens. Its interrupt is
+// the YM2151's line, up for as long as a timer that interrupts has run out and the program has not cleared it.
+void Machine::RunClassicSound(int cycles) {
+    m_classicFraction += static_cast<uint64_t>(cycles) * Cps1Sound::kClock;
+    m_soundTime += m_classicFraction / kSoundClock;
+    m_classicFraction %= kSoundClock;
+    while (soundCpu.cycles < m_soundTime) {
+        const uint64_t next = std::min(m_soundTime, m_classic->NextEvent());
+        soundCpu.SetInterruptLine(m_classic->Interrupt());
+        soundCpu.Run(next, soundMode);
+        soundCpu.cycles = std::max(soundCpu.cycles, next);
+        m_classic->RunTo(soundCpu.cycles, audio);
     }
 }
 
@@ -649,6 +679,11 @@ uint16_t Machine::ReadCps1(uint32_t address) {
                                  ((p2 & kStart) ? 0x20 : 0) | (testSwitch ? 0x40 : 0);
         return static_cast<uint16_t>(((~pressed & 0xFF) << 8) | 0xFF);
     }
+    if (m_classic && address == 0x80001E) {
+        // (the classic CPS-1 keeps its settings on DIP switches: all off but switch C6, the demonstrations' sound, which
+        // the boards were set to as they left the factory)
+        return 0xDFFF;
+    }
     if (address >= 0x80001A && address < 0x800020) {
         return 0xFFFF; // (no DIP switches: the settings are in the settings memory)
     }
@@ -728,6 +763,17 @@ void Machine::WriteCps1(uint32_t address, uint16_t value, uint16_t mask) {
         }
         return;
     }
+    if (m_classic && address >= 0x800180 && address < 0x800190) {
+        // The classic CPS-1's sound latches: a request (0x800180-0x800187) and the music's volume (0x800188-0x80018F),
+        // which its Z80 reads at F008 and F00A
+        if (mask & 0x00FF) {
+            m_latch[address >= 0x800188] = static_cast<uint8_t>(value);
+            if (m_logClassic) {
+                fprintf(stderr, "68000 latch %d = %02X (frame %llu)\n", address >= 0x800188 ? 2 : 1, value & 0xFF, static_cast<unsigned long long>(frame));
+            }
+        }
+        return;
+    }
     if ((address >= 0x800030 && address < 0x800038) || address == 0xF1C004 || (address >= 0x800180 && address < 0x800190)) {
         return; // (coin counters and lock-outs; the CPS-1's sound latches, which a QSound board does not use)
     }
@@ -737,6 +783,9 @@ void Machine::WriteCps1(uint32_t address, uint16_t value, uint16_t mask) {
 // --- the Z80's bus ---
 
 uint8_t Machine::Read(uint16_t address) {
+    if (m_classic) {
+        return ReadClassic(address);
+    }
     if (address < 0x8000) {
         return m_roms.soundProgram[address];
     }
@@ -760,6 +809,10 @@ uint8_t Machine::Read(uint16_t address) {
 }
 
 void Machine::Write(uint16_t address, uint8_t value) {
+    if (m_classic) {
+        WriteClassic(address, value);
+        return;
+    }
     if (address >= 0xC000 && address < 0xD000) {
         if (soundSide == SoundSide::Check && address == 0xC00F && value == 0xFF) {
             soundDriver->TakeCommand(); // (the sound program's interrupt has taken a command)
@@ -815,6 +868,59 @@ bool Machine::LeaveSoundRequest(const uint8_t request[16]) {
     return true;
 }
 
+// The classic CPS-1's Z80 map (as MAME's CPS-1 driver records it): ROM, a bank of it, its RAM, the YM2151, the OKI
+// and the 68000's two latches
+uint8_t Machine::ReadClassic(uint16_t address) {
+    if (address < 0x8000) {
+        return m_roms.soundProgram[address];
+    }
+    if (address < 0xC000) {
+        const size_t at = 0x8000 + static_cast<size_t>(m_soundBank) * 0x4000 + (address - 0x8000);
+        return at < m_roms.soundProgram.size() ? m_roms.soundProgram[at] : 0xFF;
+    }
+    if (address >= 0xD000 && address < 0xD800) {
+        return m_classicRam[address - 0xD000];
+    }
+    switch (address) {
+    case 0xF000:
+    case 0xF001:
+        return m_classic->ReadYm(soundCpu.cycles);
+    case 0xF002:
+        return m_classic->ReadOki();
+    case 0xF008:
+        return m_latch[0];
+    case 0xF00A:
+        return m_latch[1];
+    }
+    return 0xFF;
+}
+
+void Machine::WriteClassic(uint16_t address, uint8_t value) {
+    if (address >= 0xD000 && address < 0xD800) {
+        m_classicRam[address - 0xD000] = value;
+        return;
+    }
+    switch (address) {
+    case 0xF000:
+    case 0xF001:
+        m_classic->WriteYm(address - 0xF000, value, soundCpu.cycles);
+        soundCpu.SetInterruptLine(m_classic->Interrupt()); // (writing the timers' register clears it)
+        break;
+    case 0xF002:
+        m_classic->WriteOki(value);
+        if (m_logClassic) {
+            fprintf(stderr, "z80   oki %02X (frame %llu, timers run out so far %llu)\n", value, static_cast<unsigned long long>(frame), static_cast<unsigned long long>(m_classic->TimersRunOut()));
+        }
+        break;
+    case 0xF004:
+        m_soundBank = value & 0x01;
+        break;
+    case 0xF006:
+        m_classic->SetPin7(value & 0x01);
+        break;
+    }
+}
+
 void Machine::Serialize(Archive &ar) {
     ar.Mark(0x4D414348);
     cpu.Serialize(ar);
@@ -868,6 +974,26 @@ void Machine::Serialize(Archive &ar) {
         ar.Pod(m_palettePending);
     } else if (!ar.Saving()) {
         m_palettePending = false;
+    }
+    if (m_classic) {
+        if (ar.version == 0 || ar.version >= 9) { // (the classic CPS-1's sound: from version 9)
+            m_classic->Serialize(ar);
+            ar.Pod(m_classicRam);
+            ar.Pod(m_latch);
+            ar.Pod(m_classicFraction);
+        } else if (!ar.Saving()) {
+            // (a save state from when the classic CPS-1 had no sound: its sound side starts afresh, counted from here)
+            m_classic->Reset();
+            memset(m_classicRam, 0, sizeof(m_classicRam));
+            memset(m_latch, 0, sizeof(m_latch));
+            m_classicFraction = 0;
+            m_soundRunning = true;
+            m_soundBank = 0;
+            m_soundTime = 0;
+            soundCpu.Reset();
+            soundCpu.cycles = 0;
+            soundCpu.SetInterruptLine(false);
+        }
     }
 }
 
