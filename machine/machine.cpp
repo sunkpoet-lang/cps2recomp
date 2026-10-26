@@ -45,7 +45,7 @@ Machine::Machine(const RomSet &roms)
     , m_roms(roms)
     , m_picture(static_cast<size_t>(Video::kMaxWidth) * Video::kHeight)
     , m_cps1(roms.board.cps1)
-    , m_cyclesPerLine(roms.board.cps1 ? kCps1CpuCyclesPerLine : kCpuCyclesPerLine) {
+    , m_cyclesPerLine(roms.board.cps1 ? kCps1CpuCyclesPerLine * roms.board.cpuClock / 12 : kCpuCyclesPerLine) {
     Video::Sources sources;
     sources.graphics = roms.graphics.data();
     sources.graphicsSize = roms.graphics.size();
@@ -679,13 +679,10 @@ uint16_t Machine::ReadCps1(uint32_t address) {
                                  ((p2 & kStart) ? 0x20 : 0) | (testSwitch ? 0x40 : 0);
         return static_cast<uint16_t>(((~pressed & 0xFF) << 8) | 0xFF);
     }
-    if (m_classic && address == 0x80001E) {
-        // (the classic CPS-1 keeps its settings on DIP switches: all off but switch C6, the demonstrations' sound, which
-        // the boards were set to as they left the factory)
-        return 0xDFFF;
-    }
     if (address >= 0x80001A && address < 0x800020) {
-        return 0xFFFF; // (no DIP switches: the settings are in the settings memory)
+        // The DIP switches, banks A, B and C in the high byte (game.cfg's dip; without it, all off: a CPS-1 with QSound
+        // keeps its settings in the settings memory)
+        return static_cast<uint16_t>((m_roms.board.dip[(address - 0x80001A) / 2] << 8) | 0xFF);
     }
     if (address == 0xF1C000 || address == 0xF1C002) {
         const uint16_t p = players[address == 0xF1C000 ? 2 : 3];

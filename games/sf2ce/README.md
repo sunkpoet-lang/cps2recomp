@@ -66,4 +66,6 @@ and effects throughout a match, no sample clipped; the same sound with and witho
 picture and sound unchanged. The translated sound program and the interpreter sound alike (they differ by a few
 cycles, as on the QSound boards). It costs about 15% of the speed without a window (580 frames a second against 685).
 
+**The DIP switches** are as the boards left the factory (`dip` in game.cfg, `FF FC 9F`): difficulty 4 (normal), continues allowed, the demonstrations' sound. Before, the port read them all off: the easiest difficulty and no continues.
+
 **Next.** The DIP switches by name (free play, difficulty), and the features the other fighting games have.

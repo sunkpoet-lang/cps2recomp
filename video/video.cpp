@@ -332,7 +332,16 @@ void Video::DrawObjectsCps1(int rasterLine, uint16_t *pens, const uint8_t *high,
                 }
                 const int cx = flipX ? across - 1 - tx : tx, cy = flipY ? down - 1 - ty : ty;
                 const uint32_t tile = (code & ~0xFu) + ((code + cx) & 0xF) + 0x10 * cy;
-                const uint32_t at = tile * 128 + static_cast<uint32_t>(flipY ? 15 - line : line) * 8;
+                uint32_t at = tile * 128 + static_cast<uint32_t>(flipY ? 15 - line : line) * 8;
+                if (!m_src.board.gfxMap.empty()) {
+                    // (through the graphics mapper, in units of 8x8 tiles as the scroll screens; a tile it has no
+                    // range for is not drawn)
+                    const int64_t mapped = MapTile(m_src.board, GfxRange::kObjects, tile << 1);
+                    if (mapped < 0) {
+                        continue;
+                    }
+                    at = static_cast<uint32_t>(mapped) * 64 + static_cast<uint32_t>(flipY ? 15 - line : line) * 8;
+                }
                 if (at + 8 > m_src.graphicsSize) {
                     continue;
                 }

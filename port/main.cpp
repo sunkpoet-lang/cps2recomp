@@ -197,6 +197,25 @@ bool Port::Init(std::string &error) {
         error = "game.cfg's gfx_map cannot be read";
         return false;
     }
+#ifdef GAME_CPU_CLOCK
+    list.board.cpuClock = atoi(GAME_CPU_CLOCK);
+    if (list.board.cpuClock != 10 && list.board.cpuClock != 12) {
+        error = "game.cfg's cpu_clock is 10 or 12 (MHz)";
+        return false;
+    }
+#endif
+#ifdef GAME_DIP
+    {
+        unsigned a, b, c;
+        if (sscanf(GAME_DIP, "%x %x %x", &a, &b, &c) != 3 || a > 0xFF || b > 0xFF || c > 0xFF) {
+            error = "game.cfg's dip is three hex bytes (banks A, B and C)";
+            return false;
+        }
+        list.board.dip[0] = static_cast<uint8_t>(a);
+        list.board.dip[1] = static_cast<uint8_t>(b);
+        list.board.dip[2] = static_cast<uint8_t>(c);
+    }
+#endif
     if (!LoadRomSet(opt.romPath, list, roms, error)) {
         return false;
     }

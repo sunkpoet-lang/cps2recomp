@@ -49,3 +49,5 @@ Champion Edition's (its README says how it is made), and plays the same way.
 **How much of Champion Edition it shares.** `tools/portmap.py` placed 16,514 of Champion Edition's 18,036 walked
 instructions (91.6%) on 970 anchors and moved 1,110 of its entry points: nearly the same program, so the features
 written for one would serve the other (`sources = sf2ce` with a `family.h`).
+
+**The DIP switches** are as the boards left the factory (`dip` in game.cfg, `FF FC 9F`): difficulty 4 (normal), continues allowed, the demonstrations' sound. Before, the port read them all off: the easiest difficulty and no continues.
