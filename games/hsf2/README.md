@@ -49,6 +49,15 @@ until play reaches past it. A run of 6,000 frames of made-up play (title, attrac
 ran nothing in the interpreter, at about 600 frames a second without a window. The Z80's sound program is translated
 whole.
 
+**Its music, for a custom soundtrack** (`src/music.cpp`). The sound program's table of songs is Super Turbo's
+layout with the same 68 pieces of music under the same numbers, so they carry Super Turbo's names and its soundtracks
+play here; F12 switches between the player's files and the board's music, as in every game with named music. Seen in
+made-up play (three runs of 20,000 frames): the stages of Ryu, Guile, Dhalsim, Cammy and T. Hawk (a stage's tune is
+the stage's, whoever fights there), the later versions of Guile's, Dhalsim's and T. Hawk's, versus and the winner,
+all as in Super Turbo; player select is 0x34 here (the screen with the choice of version), not Super Turbo's 0xD3.
+Not seen yet, named as Super Turbo has them: the title (attract mode plays no sound unless the board's demo sound is
+on), the other stages, the final fight, continue, game over, the ranking, the ending and the staff roll.
+
 **How much of Super Turbo it shares.** `tools/portmap.py --from work/ssf2t --to work/hsf2 --limit 400000` placed
 11,988 of Super Turbo's 29,411 walked instructions (40.8%) on 602 anchors, named 2,325 places, and moved 244 of its
 825 entry points. Much of the program is Super Turbo's, but moved and changed, as the version select and the added
