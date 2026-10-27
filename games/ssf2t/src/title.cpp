@@ -21,11 +21,12 @@ namespace cps2recomp {
 namespace {
     using namespace ssf2t;
 
-    constexpr uint16_t kBooted = 0x10, kIntroduction = 0x02, kTitle = 0x16;
+    // (the step numbers: family.h, kBooted, kIntro, kTitle)
     constexpr int kSkipMost = 6000; // frames after which the skipping is given up
 
     bool g_skipping = false;
     bool g_booted = false; // the board's own start (the warning) is over
+    bool g_intro = false;  // ... and the introduction has begun (in some games, logos come between)
     bool g_fast = false;   // this file asked for the game to run unseen
     int g_frames = 0;
 
@@ -44,6 +45,7 @@ void TitleFrame(Machine &machine) {
     if (machine.frame <= 1 && mode == 0) {
         g_skipping = FeatureOn("skip_intro") && !modes::AttractMode(); // (attract mode is the show itself)
         g_booted = false;
+        g_intro = false;
         g_frames = 0;
     }
     // (the feature switched off while it skips: the picture comes back at once)
@@ -53,8 +55,11 @@ void TitleFrame(Machine &machine) {
     if (g_skipping) {
         const bool wasBooted = g_booted;
         g_booted = g_booted || mode == kBooted;
-        const bool title = wasBooted && mode == kIntroduction && Ram16(kGameStep) >= kTitle;
-        if (title || (wasBooted && mode > kIntroduction && mode != kBooted) || ++g_frames > kSkipMost) {
+        const bool wasIntro = g_intro;
+        g_intro = g_intro || (wasBooted && mode == kIntro);
+        const bool title = wasIntro && mode == kIntro && Ram16(kGameStep) >= kTitle;
+        // (the introduction over: its title, or the title that asks for Start when a coin is in)
+        if (title || (wasIntro && mode != kIntro && mode != kBooted && mode != 0) || ++g_frames > kSkipMost) {
             g_skipping = false;
         }
     }

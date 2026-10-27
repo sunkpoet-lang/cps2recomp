@@ -38,7 +38,7 @@ namespace {
         return Ram16(kMode) == kModeGame && Ram16(kGameStep) == kGameMatch && Ram16(kMatchStep) == kMatchFought;
     }
     bool Choosing() {
-        return Ram16(kMode) == kModeGame && Ram16(kGameStep) == kGameChoosing && Ram8(kPlayersIn) == 3;
+        return Ram16(kMode) == kModeChoosing && Ram16(kGameStep) == kGameChoosing && Ram8(kPlayersIn) == 3;
     }
 
     // The stage wanted put in kStage (none: the game's own)
@@ -57,7 +57,9 @@ namespace {
         for (int n = 0; n < 2; n++) {
             if (wanted.characters[n] >= 0 && wanted.characters[n] < kCharacters) {
                 SetRam8(Player(n) + kCharacter, static_cast<uint8_t>(wanted.characters[n]));
-                SetRam8(Player(n) + kAkuma, 0);
+                if (kAkuma) {
+                    SetRam8(Player(n) + kAkuma, 0);
+                }
                 SetRam8(Player(n) + kOld, 0);
             }
             if (wanted.colours[n] >= 0) {

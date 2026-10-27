@@ -24,7 +24,7 @@ namespace {
     // The stun: a word of what has built up (each hit adds to it: 07F1EE), and the frames until it goes away (+5C, the
     // word before it, counted down at 077EE2); the player is stunned when it reaches a word of the table at 07F1C6, by a
     // byte that steps by two each time the player has been stunned (30, then 34, then 35)
-    constexpr uint32_t kStun = 0x5E, kStunTimes = 0x2B1, kStunMost = 0x07F1C6;
+    constexpr uint32_t kStun = 0x5E, kStunTimes = 0x2B1, kStunMost = At(0x07F1C6);
 
     int PlayerOf(uint32_t record) {
         record &= 0xFFFFFF;
@@ -98,7 +98,7 @@ namespace {
         const uint32_t player = Player(n);
         const uint8_t who = Ram8(player + kCharacter);
         fight::MoveLog::Start start;
-        start.character = Ram8(player + kAkuma) ? "Akuma" : who < kCharacters ? kCharacterNames[who] : "?";
+        start.character = kAkuma && Ram8(player + kAkuma) ? "Akuma" : who < kCharacters ? kCharacterNames[who] : "?";
         start.input = fight::Notation(PanelHeld(n), Ram8(player + kFacesRight) == 0);
         start.air = Ram8(player + kState) == kJump || Ram8(player + kInAir) != 0;
         start.id = Ram32(player + kFrame); // (the move's first animation frame)
@@ -107,13 +107,18 @@ namespace {
 
     // A box of a record's (a player's or a thrown thing's), placed in the stage as the hit test 0BF5AE places it
     void AddBox(M68K &c, std::vector<fight::StageBox> &boxes, fight::BoxKind kind, uint32_t record, uint32_t box, bool thrown = false) {
-        int across = static_cast<int8_t>(c.Read(box, 0));
-        const int up = static_cast<int8_t>(c.Read(box + 1, 0));
-        const int halfWidth = static_cast<int8_t>(c.Read(box + 2, 0)), halfHeight = static_cast<int8_t>(c.Read(box + 3, 0));
+        // (signed bytes, or words: family.h, kBoxWords)
+        auto field = [&](int n) {
+            return kBoxWords ? static_cast<int>(static_cast<int16_t>(c.Read(box + 2 * n, 1)))
+                             : static_cast<int>(static_cast<int8_t>(c.Read(box + n, 0)));
+        };
+        int across = field(0);
+        const int up = field(1);
+        const int halfWidth = field(2), halfHeight = field(3);
         if (halfWidth <= 0 || halfHeight <= 0) {
             return;
         }
-        if (kind == fight::BoxKind::Attack && (c.Read(box + 5, 0) & 0x80)) {
+        if (kLongReach && kind == fight::BoxKind::Attack && (c.Read(box + 5, 0) & 0x80)) {
             across = -static_cast<int>(c.Read(box + 5, 0)); // (a long reach: 0BF5B6)
         }
         const int x = static_cast<int16_t>(Ram16(record + kX)) + (Ram8(record + kFacesRight) ? -across : across);
@@ -147,8 +152,11 @@ namespace {
             }
             constexpr struct {
                 uint32_t number, table;
-            } kHurt[] = {{kFrameHead, kTableHead}, {kFrameBody, kTableBody}, {kFrameLegs, kTableLegs}};
+            } kHurt[] = {{kFrameHead, kTableHead}, {kFrameBody, kTableBody}, {kFrameLegs, kTableLegs}, {kFrameFourth, kTableFourth}};
             for (const auto &hurt : kHurt) {
+                if (!hurt.number) {
+                    continue; // (no fourth box: family.h)
+                }
                 if (const uint32_t box = BoxOf(c, player, hurt.number, hurt.table, kBoxSize)) {
                     AddBox(c, boxes, fight::BoxKind::Hurt, player, box);
                 }

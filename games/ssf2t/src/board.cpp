@@ -36,8 +36,8 @@ namespace {
         int first; // the value of the first choice after "As the board is set"
     };
     constexpr Setting kSettings[] = {
-        {"board_difficulty", kVars + 0x2D3, 0}, {"board_speed", kVars + 0x3A9, 0}, {"board_continue", kVars + 0x2DA, 0},
-        {"board_demo_sound", kVars + 0x2DD, 0},
+        {"board_difficulty", ssf2t::At(kVars + 0x2D3), 0}, {"board_speed", ssf2t::At(kVars + 0x3A9), 0}, {"board_continue", ssf2t::At(kVars + 0x2DA), 0},
+        {"board_demo_sound", ssf2t::At(kVars + 0x2DD), 0},
     };
 
     // The board's own values of what was chosen, to put back for its test menu. (All three are kept with the game's
@@ -111,8 +111,8 @@ void RegisterBoard() {
                              {kAsSet, "Turbo 1", "Turbo 2", "Turbo 3", "Turbo 4", "Free select"}});
     game.features.push_back({"board_continue", kPage, "Continue", "Whether a game over can be continued.", 0, {kAsSet, "Off", "On"}});
     game.features.push_back({"board_demo_sound", kPage, "Demo sound", "Whether the attract mode plays sound.", 0, {kAsSet, "Off", "On"}});
-    AddHook(HookAt(0x008FFC), "SettingsRead", SettingsRead);
-    AddHook(HookAt(0x00D69C), "GameBegins", GameBegins);
+    AddHook(HookAt(ssf2t::At(0x008FFC)), "SettingsRead", SettingsRead);
+    AddHook(HookAt(ssf2t::At(0x00D69C)), "GameBegins", GameBegins);
 }
 
 } // namespace cps2recomp

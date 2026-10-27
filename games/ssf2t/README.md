@@ -201,3 +201,5 @@ nothing from the game, ever).
 
 GPL-3.0-only (see [LICENSE](../../LICENSE)); [THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md) lists what comes
 from other projects. The repository holds no game data and nothing derived from it.
+
+**Its sources are shared (this fork).** [Hyper Street Fighter II](../hsf2/README.md) builds them too: every place they name in the program or the memory is written `At(0x...)` (src/places.h), which here is the place itself (family.h has no list) and there is where that place is in that game; what else differs (the game's steps, the players' records past +2B4, the boxes' layout, the choice's tune) is in each game's family.h. Super Turbo plays the same, frame for frame.
