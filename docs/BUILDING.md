@@ -59,6 +59,12 @@ Built by cross-compiling with MinGW-w64 on Linux (`tools/release/windows.sh`), o
 `mingw-w64-ucrt-x86_64-{gcc,cmake,ninja,python,sdl3,zlib}` and the same targets. Microsoft's compiler has not
 been tried.
 
+The collection's online tunnel (`tunel/`, the ONLINE card's: Rust with Iroh) is built by `tools/tunel.sh`, which
+`tools/collection.sh` runs: it needs Rust's `cargo`, installed with rustup (`rustup-init.exe`, the default
+`x86_64-pc-windows-msvc` toolchain) and Visual Studio's Build Tools with the C++ workload. The script finds rustup's
+folder from MSYS2 and keeps MSYS2's own `link` out of Rust's way. Without cargo the collection is built as before,
+with no tunnel and no ONLINE card.
+
 ## The checks
 
 ```sh

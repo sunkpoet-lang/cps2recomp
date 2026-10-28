@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: GPL-3.0-only
+# Part of cps2recomp (the user's fork).
+#
+# cps-tunel: a game's UDP netplay carried over an Iroh connection (direct, or through a public relay), joined with a
+# room code to copy and paste. Built by tools/tunel.sh into build/tunel/ and copied beside the launcher.
+[package]
+name = "cps-tunel"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-only"
+publish = false
+
+[dependencies]
+iroh = "1.4"
+tokio = { version = "1", features = ["full"] }
+anyhow = "1"
+bytes = "1"
+data-encoding = "2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Threading"] }
+
+[profile.release]
+opt-level = 3
+strip = true
