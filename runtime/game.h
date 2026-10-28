@@ -96,6 +96,9 @@ struct Game {
     // A training session is on (the game's own idea of one): the training aids (kFeatureTraining) work only then.
     // Not given: they work everywhere.
     bool (*inTraining)() = nullptr;
+    // Online play is on (port/online.h): the features each player keeps for themself and that would change the board
+    // both share (the cheats, the custom soundtrack, run-ahead, rapid fire, the custom colours) read as off
+    bool online = false;
     // With the board's timing (the port's arcade_timing feature) the game's own code runs in place of the readable
     // rewrites, whose time is only what their originals' takes without the board's waits: unless this says the
     // rewrites are needed now (training mode, a mode of the sources' own, widescreen, a cheat that works inside
@@ -127,6 +130,8 @@ bool FeatureOn(const char *name);
 void SetFeature(const char *name, bool on);
 // For a feature with choices: which is chosen (0: the first, which is off), and choosing
 int FeatureValue(const char *name);
+// What online play turns off (Game::online): a player's own choice that would change the board both share
+bool OnlineOff(const std::string &name);
 void SetFeatureValue(const char *name, int value);
 // What the player has chosen for a feature, whether it works now or not (the menu shows this; FeatureValue gives
 // 0 for a training aid outside a training session)

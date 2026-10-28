@@ -8,7 +8,9 @@
 #include "port.h"
 #include "present.h"
 
+#include "../recomp-common/text.h"
 #include "../runtime/game.h"
+#include "online.h"
 
 #include <SDL3/SDL.h>
 
@@ -183,6 +185,9 @@ int RunWindowed(Port &port) {
         }
     };
     auto quickState = [&](bool save) {
+        if (port.online) {
+            return; // (no save states online)
+        }
         std::string error;
         const std::string path = port.StatePath(port.menu.Slot());
         if (!(save ? port.SaveState(path, error) : port.LoadState(path, error))) {
@@ -191,6 +196,31 @@ int RunWindowed(Port &port) {
     };
     const double kFrameNs = 1e9 / Machine::kFramesPerSecond;
     uint64_t nextFrame = SDL_GetTicksNS();
+
+    // Online (online.h): the session runs the frames, with this side's controls as its player's
+    Online online;
+    const bool isOnline = port.opt.online.mode != OnlineOptions::Mode::Off;
+    if (isOnline) {
+        std::string error;
+        if (!online.Start(port, port.opt.online, error)) {
+            fprintf(stderr, "online: %s\n", error.c_str());
+            SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, title, ("Online: " + error).c_str(), window);
+            return 1;
+        }
+        const OnlineOptions::Mode mode = port.opt.online.mode;
+        const char *who = mode == OnlineOptions::Mode::Host ? "player 1" : mode == OnlineOptions::Mode::Join ? "player 2" : "stress test";
+        SDL_SetWindowTitle(window, (std::string(title) + " - online, " + who).c_str());
+    }
+    // (online, a frame's time is a touch longer while this side is ahead of the other's)
+    auto pace = [&]() {
+        nextFrame += static_cast<uint64_t>(kFrameNs * (isOnline && online.FramesAhead() > 1.0f ? 1.016 : 1.0));
+        const uint64_t now = SDL_GetTicksNS();
+        if (nextFrame > now) {
+            SDL_DelayPrecise(nextFrame - now);
+        } else if (now - nextFrame > 100000000ull) {
+            nextFrame = now; // (fell far behind: start counting again)
+        }
+    };
     bool running = true;
     while (running && !port.quit && (port.opt.frames == 0 || port.frame < port.opt.frames)) {
         SDL_Event ev;
@@ -378,13 +408,30 @@ int RunWindowed(Port &port) {
                 port.menu.Draw(menuPicture.data(), static_cast<int>(menuWidth), static_cast<int>(menuHeight));
             }
             presenter.Show(menuPicture.data(), static_cast<int>(menuWidth), static_cast<int>(menuHeight), where);
+            if (isOnline) {
+                // (online, the game goes on behind the menu, with this side's controls let go, unheard)
+                const uint16_t none[2] = {};
+                online.Tick(none);
+                port.machine->audio.clear();
+                pace();
+                continue;
+            }
             SDL_Delay(8);
             nextFrame = SDL_GetTicksNS();
             continue;
         }
 
-        const int slowBy = port.paused ? 1 : port.menu.SlowBy();
-        const bool ran = port.Tick();
+        const int slowBy = port.paused || isOnline ? 1 : port.menu.SlowBy();
+        bool ran;
+        if (isOnline) {
+            // (this side's player: the keyboard's players' keys and the gamepads together; the stress test's two)
+            const bool stress = port.opt.online.mode == OnlineOptions::Mode::Stress;
+            const uint16_t local[2] = {static_cast<uint16_t>(stress ? port.pad[0] : port.pad[0] | port.pad[1]),
+                                       stress ? port.pad[1] : uint16_t{0}};
+            ran = online.Tick(local) > 0;
+        } else {
+            ran = port.Tick();
+        }
 
         if (audio && silent != (port.menu.muted || audioLog)) {
             silent = port.menu.muted || audioLog;
@@ -452,16 +499,30 @@ int RunWindowed(Port &port) {
         }
 
         port.Shown(shown);
+        if (isOnline) {
+            // What the session says (waiting, connecting, a desync, the other player gone) in the middle, and while
+            // playing the ping, delay and rollbacks in a corner
+            const int across = port.ShownWidth(), lines = Video::kHeight;
+            const recomp::text::Canvas canvas{shown.data(), across, lines};
+            const std::string &message = online.Message();
+            if (!message.empty()) {
+                const float wide = recomp::text::TextWidth(message.c_str(), 1);
+                const float x = (across - wide) / 2, y = lines / 2 - 6;
+                canvas.Fill(x - 6, y - 5, wide + 12, 18, {20, 22, 30, 230});
+                const recomp::text::Color colour = online.Failed() ? recomp::text::Color{255, 120, 110, 255} : recomp::text::Color{255, 255, 255, 255};
+                canvas.Text(x, y, 1, 0, colour, message.c_str());
+            }
+            const std::string stats = online.Stats();
+            if (!stats.empty()) {
+                const float wide = recomp::text::TextWidth(stats.c_str(), 1);
+                canvas.Fill(across - wide - 6, lines - 12, wide + 4, 11, {20, 22, 30, 160});
+                canvas.Text(across - wide - 4, lines - 11, 1, 0, {200, 220, 255, 255}, stats.c_str());
+            }
+        }
         presenter.Show(shown.data(), port.ShownWidth(), Video::kHeight, where);
 
         if (!port.opt.unthrottled && !FastForward()) {
-            nextFrame += static_cast<uint64_t>(kFrameNs);
-            const uint64_t now = SDL_GetTicksNS();
-            if (nextFrame > now) {
-                SDL_DelayPrecise(nextFrame - now);
-            } else if (now - nextFrame > 100000000ull) {
-                nextFrame = now; // (fell far behind: start counting again)
-            }
+            pace();
         }
     }
     for (SDL_Gamepad *gp : gamepads) {

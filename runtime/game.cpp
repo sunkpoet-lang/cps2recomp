@@ -176,9 +176,25 @@ int FeatureSetting(const char *name) {
     return it == g_on.end() ? 0 : it->second;
 }
 
+bool OnlineOff(const std::string &name) {
+    if (name == "run_ahead" || name == "rapid_fire" || name == "custom_colours") {
+        return true;
+    }
+    for (const Feature &feature : TheGame().features) {
+        if (name == feature.name) {
+            return !strcmp(feature.category, "Cheats") || !strcmp(feature.category, "Sound");
+        }
+    }
+    return false;
+}
+
 int FeatureValue(const char *name) {
     const auto it = g_on.find(name);
     if (it == g_on.end() || it->second == 0) {
+        return 0;
+    }
+    // (online: off, OnlineOff)
+    if (TheGame().online && OnlineOff(it->first)) {
         return 0;
     }
     // (a training aid, outside a training session: off)

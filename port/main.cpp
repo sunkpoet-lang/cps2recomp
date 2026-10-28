@@ -32,6 +32,7 @@
 #include <sstream>
 #include <filesystem>
 #include <set>
+#include <thread>
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -651,7 +652,14 @@ bool Port::Init(std::string &error) {
     machine->cpu.watchLow = opt.watchLow;
     machine->cpu.watchHigh = opt.watchHigh;
     machine->cpu.recording = !opt.recordEntries.empty();
-    if (!opt.eepromPath.empty()) {
+    // (online, both boards start as new ones, the Board page's settings put in by both: each player's own settings
+    // memory is left as it is, and is not written after)
+    const bool online = opt.online.mode != OnlineOptions::Mode::Off;
+    if (online && !opt.stateLoad.empty()) {
+        error = "a state can't be loaded to play online";
+        return false;
+    }
+    if (!opt.eepromPath.empty() && !online) {
         std::vector<uint8_t> data;
         if (ReadFile(opt.eepromPath, data) && data.size() == sizeof(machine->eeprom.words)) {
             memcpy(machine->eeprom.words, data.data(), data.size());
@@ -733,6 +741,11 @@ void Port::AskSound(const uint8_t request[16]) {
 }
 
 void Port::ToggleSoundtrack(bool say) {
+    if (online) {
+        notice = "No custom soundtrack online";
+        noticeUntil = tick + 120;
+        return;
+    }
     if (!TheGame().songCount) {
         return;
     }
@@ -816,6 +829,10 @@ uint32_t Port::StateHash() const {
 }
 
 void Port::MenuAct(Menu::Action action) {
+    if (online && action != Menu::Action::None && action != Menu::Action::Coin && action != Menu::Action::Quit) {
+        menu.Note("Not while playing online.");
+        return;
+    }
     std::string error;
     const std::string path = StatePath(menu.Slot());
     switch (action) {
@@ -870,6 +887,9 @@ void Port::RunCommand(size_t index) {
 }
 
 void Port::Key(char key, unsigned n) {
+    if (online && key != 'm') {
+        return; // (both players' games run on together: no stopping, slowing or commands)
+    }
     switch (key) {
     case 'p':
         paused = !paused;
@@ -1291,13 +1311,7 @@ void Port::RapidFire() {
     }
 }
 
-void Port::RunFrame() {
-    ClearSpareRan();
-    SoundtrackFollow();
-    if (soundRequestTries > 0 && (machine->LeaveSoundRequest(soundRequest) || --soundRequestTries == 0)) {
-        soundRequestTries = 0;
-    }
-    machine->SetBoardTiming(FeatureOn("arcade_timing"));
+void Port::GatherInput() {
     if (!opt.moviePlay.empty()) {
         auto it = playMovie.changes.find(frame);
         if (it != playMovie.changes.end()) {
@@ -1327,6 +1341,40 @@ void Port::RunFrame() {
             std::copy(std::begin(autoPad), std::end(autoPad), pad);
         }
     }
+}
+
+void Port::RunOnlineFrame(const uint16_t players[2]) {
+    ClearSpareRan();
+    SoundtrackFollow();
+    machine->SetBoardTiming(FeatureOn("arcade_timing"));
+    memset(machine->players, 0, sizeof(machine->players));
+    machine->players[0] = players[0];
+    machine->players[1] = players[1];
+    machine->serviceButton = false;
+    machine->testSwitch = false;
+    ApplyBoardOptions(*machine);
+    ApplyCheats();
+    if (TheGame().beforeFrame) {
+        TheGame().beforeFrame(*machine);
+    }
+    machine->RunFrame();
+    if (TheGame().frame) {
+        TheGame().frame(*machine);
+    }
+    frame++;
+    if (hashFile) {
+        fprintf(hashFile, "%llu %08x\n", static_cast<unsigned long long>(frame), StateHash());
+    }
+}
+
+void Port::RunFrame() {
+    ClearSpareRan();
+    SoundtrackFollow();
+    if (soundRequestTries > 0 && (machine->LeaveSoundRequest(soundRequest) || --soundRequestTries == 0)) {
+        soundRequestTries = 0;
+    }
+    machine->SetBoardTiming(FeatureOn("arcade_timing"));
+    GatherInput();
     if (!opt.movieRecord.empty() && memcmp(pad, lastRecorded, sizeof(pad)) != 0) {
         std::copy(std::begin(pad), std::end(pad), recMovie.changes[frame].begin());
         memcpy(lastRecorded, pad, sizeof(pad));
@@ -1453,7 +1501,7 @@ void Port::Finish() {
     if (!opt.movieRecord.empty()) {
         recMovie.Save(opt.movieRecord);
     }
-    if (!opt.eepromPath.empty() && machine->eeprom.changed) {
+    if (!opt.eepromPath.empty() && machine->eeprom.changed && opt.online.mode == OnlineOptions::Mode::Off) {
         WriteFile(opt.eepromPath, machine->eeprom.words, sizeof(machine->eeprom.words));
     }
     if (!opt.recordEntries.empty()) {
@@ -1517,6 +1565,8 @@ void Usage() {
             "  --rom2 PATH            (a game that reads another set too) that set: a folder or zip (else\n"
             "                         beside --rom, by the set's name)\n"
             "  --eeprom FILE          where the board's settings memory is kept\n"
+            "  --host [PORT]          online, player 1, waiting on that UDP port (7845); --join HOST:PORT, player 2;\n"
+            "  --delay N              the local controls N frames late (1); --stress: rollback every frame (online.h)\n"
             "  --cpu MODE             native (translated code), blocks (the interpreter run the same way),\n"
             "                         interp (the interpreter, an instruction at a time), check\n"
             "  --sound SIDE           driver (the sound program as ordinary code), z80 (the program itself),\n"
@@ -1646,6 +1696,23 @@ bool ParseArgs(int argc, char **argv, port::Options &o) {
             o.stateLoad = next();
         } else if (a == "--stats") {
             o.stats = true;
+        } else if (a == "--host") {
+            o.online.mode = port::OnlineOptions::Mode::Host;
+            if (i + 1 < argc && argv[i + 1][0] != '-') {
+                o.online.port = static_cast<uint16_t>(atoi(next()));
+            }
+        } else if (a == "--join") {
+            const std::string v = next();
+            const size_t colon = v.rfind(':');
+            o.online.mode = port::OnlineOptions::Mode::Join;
+            o.online.host = v.substr(0, colon);
+            if (colon != std::string::npos) {
+                o.online.port = static_cast<uint16_t>(atoi(v.c_str() + colon + 1));
+            }
+        } else if (a == "--delay") {
+            o.online.delay = atoi(next());
+        } else if (a == "--stress") {
+            o.online.mode = port::OnlineOptions::Mode::Stress;
         } else if (a == "--list-features") {
             // For the launcher: one optional feature per line (recomp-common/settings.h; the ones that last a
             // session, switched in the game's menu only, are not in it)
@@ -1823,7 +1890,36 @@ int main(int argc, char **argv) {
     }
     int result = 0;
     const auto begin = std::chrono::steady_clock::now();
-    if (p.opt.headless) {
+    if (p.opt.headless && p.opt.online.mode != port::OnlineOptions::Mode::Off) {
+        // Online with no window, for the checks: this side's controls from the movie or the made-up play (player 1's;
+        // its player 2's too, for the stress test), a tick a frame's time but for the stress test
+        port::Online online;
+        std::string error;
+        if (!online.Start(p, p.opt.online, error)) {
+            fprintf(stderr, "%s: %s\n", GAME_NAME, error.c_str());
+            return 1;
+        }
+        const bool stress = p.opt.online.mode == port::OnlineOptions::Mode::Stress;
+        uint64_t shown = 0;
+        const uint64_t frames = p.opt.frames ? p.opt.frames : 600;
+        while (shown < frames && online.GetStatus() != port::Online::Status::Ended) {
+            p.frame = shown; // (the movie and the made-up play go by the frames seen)
+            p.GatherInput();
+            const uint16_t local[2] = {p.pad[0], stress ? p.pad[1] : uint16_t{0}};
+            const int seen = online.Tick(local);
+            p.machine->audio.clear();
+            shown += static_cast<uint64_t>(seen);
+            if (!stress) {
+                std::this_thread::sleep_for(std::chrono::microseconds(online.FramesAhead() > 1.0f ? 17000 : 16700));
+            }
+        }
+        p.frame = shown;
+        fprintf(stderr, "online: %llu frames; state hash %08x\n", static_cast<unsigned long long>(shown), p.StateHash());
+        if (!online.Message().empty()) {
+            fprintf(stderr, "online: %s\n", online.Message().c_str());
+        }
+        result = online.Failed() ? 3 : 0;
+    } else if (p.opt.headless) {
         std::vector<int16_t> sound;
         std::vector<float> music, musicMade;
         int musicRate = 0;

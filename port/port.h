@@ -6,6 +6,7 @@
 
 #include "../machine/machine.h"
 #include "menu.h"
+#include "online.h"
 #include "present.h"
 #include "soundtrack.h"
 
@@ -62,6 +63,7 @@ struct Options {
     std::string presentTest;  // --present-test FILE.png: the last picture drawn by the GPU path with no window
     int presentWidth = 0, presentHeight = 0; // --present-size WxH: the window it is drawn in
     int scale = 0;            // --scale: the window this many times the board's lines (0: the Display page's)
+    OnlineOptions online;     // --host, --join, --delay, --stress (online.h)
 };
 
 // Recorded input: what the players hold, at the frames where it changes
@@ -137,6 +139,13 @@ struct Port {
     uint64_t noticeUntil = 0;          // ... until this tick
     // One frame: input (window, movie or made up), the machine, the per-frame outputs
     void RunFrame();
+    // ... the input part of it: pad[] from the movie or the made-up play (the window sets it itself)
+    void GatherInput();
+    // Online (online.h): one frame of the session, with both players' controls as they were, and nothing of this
+    // side's own (no cheats, run-ahead, movie, test switch); `online` turns off stopping, slowing, save states,
+    // reset, the modes and the custom soundtrack
+    void RunOnlineFrame(const uint16_t players[2]);
+    bool online = false;
     void RunAhead();
     void SoundTest();
     void MusicTest();

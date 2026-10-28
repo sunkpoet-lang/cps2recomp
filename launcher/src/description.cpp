@@ -231,9 +231,10 @@ launcher::Description describe_game(const GameInfo& game) {
     // layout of its own on the Controllers page)
     d.bindings = port::MakeBoundTable(*game.players ? atoi(game.players) : 2, game.buttons, false).table;
     d.controls_heading = "WHILE PLAYING";
-    // Online play (neogeo-recomp's port/neogeo_online.h): every Neo Geo game has its own, through the tunnel beside the
-    // launcher (the ONLINE card: the host's game waits on 7845, the other's joins the tunnel's port)
-    if (!strcmp(game.board, "neogeo")) {
+    // Online play (neogeo-recomp's port/neogeo_online.h, and this fork's port/online.h for the CPS games that have passed
+    // its stress test: Super Turbo and SF2 CE), through the tunnel beside the launcher (the ONLINE card: the host's game
+    // waits on 7845, the other's joins the tunnel's port)
+    if (!strcmp(game.board, "neogeo") || !strcmp(game.id, "ssf2t") || !strcmp(game.id, "sf2ce")) {
         d.online.port = 7845;
         d.online.arguments = [](const std::string& address) {
             return address.empty() ? std::vector<std::string>{"--host", "7845"} : std::vector<std::string>{"--join", address};

@@ -113,7 +113,21 @@ if (NOT GAME_SOURCES)
     set(GAME_SOURCES runtime/no_game.cpp)
 endif ()
 # (recomp-common/: the code the recomp ports share, a copy of recomp-common's; tools/sync-common.sh)
-set(PORT_SOURCES port/main.cpp port/frontend_sdl.cpp port/present.cpp port/menu.cpp port/hud.cpp port/soundtrack.cpp port/decoders.cpp recomp-common/menu.cpp recomp-common/settings.cpp runtime/game.cpp runtime/board.cpp runtime/spare.cpp fight/frames.cpp fight/training.cpp fight/colours.cpp fight/colour_editor.cpp fight/battle.cpp fight/alternative.cpp fight/session.cpp fight/tag.cpp fight/marvel.cpp beat/modes.cpp beat/model.cpp model/model.cpp ${GAME_SOURCES})
+# GekkoNet (BSD-2-Clause): online play's rollback (port/online.h; this fork's), its library only, static, without asio
+# (the port has its own UDP adapter): the same pinned release as neogeo-recomp's
+include(FetchContent)
+set(NO_ASIO_BUILD ON CACHE BOOL "" FORCE)
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(gekkonet
+    URL https://github.com/HeatXD/GekkoNet/archive/refs/tags/v20261024222910-9da2363.tar.gz
+    URL_HASH SHA256=a9001dec8698120fe45b314527d181c403ee92e3a30a03d765d3e792b8c74e1c
+    SOURCE_SUBDIR GekkoLib
+    DOWNLOAD_EXTRACT_TIMESTAMP ON)
+FetchContent_MakeAvailable(gekkonet)
+# (the version both players of an online match must have: VERSION's)
+file(STRINGS "${CMAKE_SOURCE_DIR}/VERSION" CPS2RECOMP_VERSION LIMIT_COUNT 1)
+
+set(PORT_SOURCES port/main.cpp port/online.cpp port/frontend_sdl.cpp port/present.cpp port/menu.cpp port/hud.cpp port/soundtrack.cpp port/decoders.cpp recomp-common/menu.cpp recomp-common/settings.cpp runtime/game.cpp runtime/board.cpp runtime/spare.cpp fight/frames.cpp fight/training.cpp fight/colours.cpp fight/colour_editor.cpp fight/battle.cpp fight/alternative.cpp fight/session.cpp fight/tag.cpp fight/marvel.cpp beat/modes.cpp beat/model.cpp model/model.cpp ${GAME_SOURCES})
 
 # (the sound files' decoders, third_party/, are other projects' code, compiled as they are)
 set_source_files_properties(port/decoders.cpp PROPERTIES COMPILE_OPTIONS "-w")
@@ -140,6 +154,10 @@ if (WIN32)
 endif ()
 foreach (target ${GAME} ${GAME}-check)
     target_include_directories(${target} PRIVATE runtime port machine fight beat model "${WORK_DIR}/gen" "${GAME_DIR}" ${GAME_INCLUDES})
-    target_link_libraries(${target} PRIVATE SDL3::SDL3 ZLIB::ZLIB)
+    target_link_libraries(${target} PRIVATE SDL3::SDL3 ZLIB::ZLIB GekkoNet)
+    if (WIN32)
+        target_link_libraries(${target} PRIVATE ws2_32)
+    endif ()
+    target_compile_definitions(${target} PRIVATE CPS2RECOMP_VERSION="${CPS2RECOMP_VERSION}")
     target_compile_options(${target} PRIVATE -Wall -Wextra -Wno-unused-parameter -Wno-unused-label -Wno-unused-variable -Wno-parentheses-equality)
 endforeach ()
