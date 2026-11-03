@@ -7,6 +7,11 @@
   `game.cfg`. They go on the same Board and Cheats pages, into the same settings and the launcher's list as the
   features a game's sources register; a name both give stops the game with a message. `tools/check_config_features.py`
   checks the reading of them without a game. A game that declares none runs as before.
+- **The classic CPS-1 board** (#163): `board = cps1-classic` is the CPS-1 before QSound: the 68000 at 10 or 12 MHz
+  (`cpu_clock`), its DIP switches (`dip`), the graphics mapper (`gfx_map`), program files of words high byte first
+  (`/be`), graphics files joined in groups (`+`), and its sound, the Z80 with a YM2151 ([ymfm](third_party/), the
+  second named exception of rule 4) and an OKI MSM6295, all of it in the save state (version 10). The CPS-1 games
+  with QSound and the CPS-2 games play as before.
 - **Hyper Street Fighter II: The Anniversary Edition** (`hsf2`, USA 040202; the Asia and Japan sets of the same date
   play too): every character as they were in World Warrior, Champion Edition, Hyper Fighting, Super and Super Turbo,
   against each other, with everything the other fighting games have: training mode, the alternative modes (attract
