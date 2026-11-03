@@ -61,6 +61,8 @@ struct Options {
     std::string renderer;     // --renderer sdl|gpu (gpu unless said)
     std::string presentTest;  // --present-test FILE.png: the last picture drawn by the GPU path with no window
     int presentWidth = 0, presentHeight = 0; // --present-size WxH: the window it is drawn in
+    std::string presentBar;    // --present-bar [MENU]: ... with the menu bar's strip above it (and that menu open)
+    std::string windowEvents;  // --window-events: mouse and key events put to the window at times (frontend_sdl.cpp)
     int scale = 0;            // --scale: the window this many times the board's lines (0: the Display page's)
 };
 
@@ -117,6 +119,11 @@ struct Port {
         return machine->PictureWidth();
     }
     std::string StatePath(int slot) const;
+    // The small picture kept beside a save state (a quarter of the board's, for the menu bar's slots)
+    static std::string StatePicture(const std::string &statePath);
+    // The game's picture as the board makes it (no readout, no menu, nothing said over it) saved as a PNG in
+    // the screenshots folder beside the save states, named for the game and the time; false with the reason
+    bool Screenshot(std::string &file, std::string &error) const;
 
     bool Init(std::string &error);
     // The custom soundtrack (soundtrack.h): its files, played while the port's custom_soundtrack feature is on
@@ -151,6 +158,15 @@ struct Port {
 };
 
 int RunWindowed(Port &port);
+
+// The window's menu bar (recomp-common/menubar.h), above the picture in a window: its menus (the in-game menu's
+// rows and the window's own entries, made again whenever what they show may have changed), how many of the
+// window's pixels make a dot of its letters in a window so many pixels tall, how tall its strip is then, and
+// its picture as the presenter's overlay (the strip, and the menus open)
+void BarMenus(Port &port, recomp::MenuBar &bar, bool fullscreen);
+int BarDot(int windowHeight);
+int BarStrip(int windowHeight);
+void BarPicture(const recomp::MenuBar &bar, int width, int height, std::vector<uint32_t> &pixels, std::vector<SDL_Rect> &regions);
 // The game was started by the collection's launcher (cps2recomp-launcher is beside it, and no launcher of its own)
 bool InCollection();
 
