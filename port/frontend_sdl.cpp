@@ -265,7 +265,7 @@ void BarMenus(Port &port, recomp::MenuBar &bar, bool fullscreen) {
     menus[5].entries.push_back(BarItem("About", kBarAbout));
     // Online, what would change the match or put the two boards out of step is dim (as the in-game menu says
     // "Not while playing online"): the save states, Reset, player 2's Start, the game's features and its speed
-    if (port.online) {
+    if (port.net || port.gekkoOnline) {
         for (recomp::BarMenu &menu : menus) {
             for (recomp::BarEntry &entry : menu.entries) {
                 const std::string &l = entry.label;
@@ -782,7 +782,7 @@ int RunWindowed(Port &port) {
                        static_cast<unsigned long long>(loops), bar.IsOpen() ? "open" : "closed", picked.c_str(), bar.Boxes().size(), bar.BarShown() ? "shown" : "hidden",
                        port.menu.IsOpen() ? "open" : "closed", static_cast<unsigned long long>(port.frame), port.pad[0],
                        pointerShown ? "shown" : "hidden", isFullscreen() ? "yes" : "no", windowWidth, windowHeight, port.menu.Slot(), port.menu.muted ? "yes" : "no",
-                       port.menu.SlowBy(), port.tick < port.noticeUntil ? port.notice.c_str() : "", online.Failed() ? "FAILED " : "",
+                       port.menu.GameRate().ticks, port.tick < port.noticeUntil ? port.notice.c_str() : "", online.Failed() ? "FAILED " : "",
                        online.Message().c_str());
                 fflush(stdout);
             }

@@ -280,6 +280,8 @@ struct Port {
     // (this fork) GekkoNet online (online.h): one frame of the session with both players' controls, through Step;
     // `gekkoOnline` turns off stopping, slowing, save states, reset, the modes and the custom soundtrack
     void RunOnlineFrame(const uint16_t players[2]);
+    // ... the input part of a frame: pad[] from the movie or the made-up play (the window sets it itself)
+    void GatherInput();
     bool gekkoOnline = false;
     void RunAhead();
     void SoundTest();

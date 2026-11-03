@@ -1877,7 +1877,7 @@ bool App::play_button(size_t which, float width) {
     bool have_program = one.has_program();
     // (a port's launcher: while its game runs; a collection's: while this game runs, the others may start)
     bool ready = file_ok && have_program && !one.game.running() && (collection_ || !any_running());
-    bool online = room_.game == which;  // (its room: Play waits for it to end)
+    bool online = tunnel_room_.game == which;  // (its room: Play waits for it to end)
     ready = ready && !online;
     if (one.about->preset_summary) {
         std::string preset = recomp::Preset(one.settings);
@@ -1922,6 +1922,7 @@ void App::play_cards(size_t which, float width, bool ready) {
     const ui::Palette& p = ui::palette();
     Slot& one = *slots_[which];
     online_card(which, width, ready);
+    tunnel_card(which, width); // (this fork: a game played through the tunnel)
     // Linux and Steam Deck: shortcuts for Steam's Game Mode.
     static const bool steam = can_add_to_steam();
     if (steam) {
@@ -2006,26 +2007,26 @@ void App::open_room(size_t which, bool host) {
     args.push_back(std::to_string(own_process_id()));
     std::error_code error;
     std::filesystem::create_directories(one.folder / "logs", error);
-    room_.log = one.folder / "logs" / "tunel.log";
-    room_.read = 0;
-    room_.partial.clear();
-    room_.code.clear();
-    room_.started = false;
-    room_.rival = 0;
-    room_.connected = room_.relay = room_.left = room_.copied = false;
-    room_.ping = -1;
-    room_.error.clear();
-    room_.host = host;
+    tunnel_room_.log = one.folder / "logs" / "tunel.log";
+    tunnel_room_.read = 0;
+    tunnel_room_.partial.clear();
+    tunnel_room_.code.clear();
+    tunnel_room_.started = false;
+    tunnel_room_.rival = 0;
+    tunnel_room_.connected = tunnel_room_.relay = tunnel_room_.left = tunnel_room_.copied = false;
+    tunnel_room_.ping = -1;
+    tunnel_room_.error.clear();
+    tunnel_room_.host = host;
     std::string message;
-    if (!room_.tunnel.start(tunnel_path(), args, program_folder_, message, room_.log)) {
+    if (!tunnel_room_.tunnel.start(tunnel_path(), args, program_folder_, message, tunnel_room_.log)) {
         room_message_ = message;
         return;
     }
-    room_.game = which;
+    tunnel_room_.game = which;
     if (host) {
         // (the game waits for a player by itself; the code shows when the tunnel has it)
         play(which, one.about->online.arguments(""));
-        room_.started = true;
+        tunnel_room_.started = true;
         if (!one.play_error.empty()) {
             close_room(one.play_error);
         }
@@ -2033,17 +2034,17 @@ void App::open_room(size_t which, bool host) {
 }
 
 void App::close_room(const std::string& message) {
-    if (room_.game == SIZE_MAX) {
+    if (tunnel_room_.game == SIZE_MAX) {
         return;
     }
-    Slot& one = *slots_[room_.game];
-    room_.tunnel.stop();
-    if (room_.started) {
+    Slot& one = *slots_[tunnel_room_.game];
+    tunnel_room_.tunnel.stop();
+    if (tunnel_room_.started) {
         one.game.stop();
     }
     room_message_ = message;
-    room_message_for_ = room_.game;
-    room_.game = SIZE_MAX;
+    room_message_for_ = tunnel_room_.game;
+    tunnel_room_.game = SIZE_MAX;
 }
 
 void App::room_line(const std::string& line) {
@@ -2052,90 +2053,90 @@ void App::room_line(const std::string& line) {
     words >> word;
     // (on the host, a guest's lines carry its number: only the first guest, the rival, is shown)
     int guest = 0;
-    if (room_.host && word != "CODE") {
+    if (tunnel_room_.host && word != "CODE") {
         std::istringstream::pos_type at = words.tellg();
         if (!(words >> guest)) {
             words.clear();
             words.seekg(at);
             guest = 0;
         }
-        if (word == "CONNECTED" && room_.rival == 0) {
-            room_.rival = guest;
+        if (word == "CONNECTED" && tunnel_room_.rival == 0) {
+            tunnel_room_.rival = guest;
         }
-        if (guest != 0 && guest != room_.rival) {
+        if (guest != 0 && guest != tunnel_room_.rival) {
             return;
         }
     }
     std::string rest;
     std::getline(words >> std::ws, rest);
     if (word == "CODE") {
-        room_.code = rest;
-    } else if (word == "LISTEN" && !room_.host && !room_.started) {
+        tunnel_room_.code = rest;
+    } else if (word == "LISTEN" && !tunnel_room_.host && !tunnel_room_.started) {
         // the tunnel listens: the game joins it
-        play(room_.game, slots_[room_.game]->about->online.arguments("127.0.0.1:" + rest));
-        room_.started = true;
-        if (!slots_[room_.game]->play_error.empty()) {
-            close_room(slots_[room_.game]->play_error);
+        play(tunnel_room_.game, slots_[tunnel_room_.game]->about->online.arguments("127.0.0.1:" + rest));
+        tunnel_room_.started = true;
+        if (!slots_[tunnel_room_.game]->play_error.empty()) {
+            close_room(slots_[tunnel_room_.game]->play_error);
         }
     } else if (word == "CONNECTED") {
-        room_.connected = true;
-        room_.left = false;
+        tunnel_room_.connected = true;
+        tunnel_room_.left = false;
     } else if (word == "PATH") {
-        room_.relay = rest == "relay";
+        tunnel_room_.relay = rest == "relay";
     } else if (word == "PING") {
-        room_.ping = std::atoi(rest.c_str());
+        tunnel_room_.ping = std::atoi(rest.c_str());
     } else if (word == "CLOSED") {
-        room_.connected = false;
-        room_.left = true;
+        tunnel_room_.connected = false;
+        tunnel_room_.left = true;
     } else if (word == "ERROR") {
-        room_.error = rest;
+        tunnel_room_.error = rest;
     }
 }
 
 void App::watch_room() {
-    if (room_.game == SIZE_MAX) {
+    if (tunnel_room_.game == SIZE_MAX) {
         return;
     }
     // The tunnel's new lines
     std::error_code error;
-    uintmax_t size = std::filesystem::file_size(room_.log, error);
-    if (!error && size > room_.read) {
-        std::ifstream file(room_.log, std::ios::binary);
-        file.seekg(static_cast<std::streamoff>(room_.read));
-        std::string got(static_cast<size_t>(size - room_.read), '\0');
+    uintmax_t size = std::filesystem::file_size(tunnel_room_.log, error);
+    if (!error && size > tunnel_room_.read) {
+        std::ifstream file(tunnel_room_.log, std::ios::binary);
+        file.seekg(static_cast<std::streamoff>(tunnel_room_.read));
+        std::string got(static_cast<size_t>(size - tunnel_room_.read), '\0');
         file.read(got.data(), static_cast<std::streamsize>(got.size()));
-        room_.read += static_cast<uintmax_t>(file.gcount());
-        room_.partial.append(got.data(), static_cast<size_t>(file.gcount()));
+        tunnel_room_.read += static_cast<uintmax_t>(file.gcount());
+        tunnel_room_.partial.append(got.data(), static_cast<size_t>(file.gcount()));
         size_t end;
-        while ((end = room_.partial.find('\n')) != std::string::npos) {
-            std::string line = room_.partial.substr(0, end);
-            room_.partial.erase(0, end + 1);
+        while ((end = tunnel_room_.partial.find('\n')) != std::string::npos) {
+            std::string line = tunnel_room_.partial.substr(0, end);
+            tunnel_room_.partial.erase(0, end + 1);
             if (!line.empty() && line.back() == '\r') {
                 line.pop_back();
             }
             room_line(line);
-            if (room_.game == SIZE_MAX) {
+            if (tunnel_room_.game == SIZE_MAX) {
                 return;  // (closed by a line: the game did not start)
             }
         }
     }
-    Slot& one = *slots_[room_.game];
-    if (room_.started && !one.game.running()) {
+    Slot& one = *slots_[tunnel_room_.game];
+    if (tunnel_room_.started && !one.game.running()) {
         close_room("");  // the game ended: so does the room
-    } else if (!room_.tunnel.running() && !room_.started) {
+    } else if (!tunnel_room_.tunnel.running() && !tunnel_room_.started) {
         // The tunnel ended before the game started: a code that was not right, or no internet
-        close_room(room_.error.find("no es v") != std::string::npos
+        close_room(tunnel_room_.error.find("no es v") != std::string::npos
                        ? "That code isn't complete. Copy it again from the message and paste it whole."
-                   : room_.error.find("llena") != std::string::npos ? "That room is full."
-                   : room_.error.empty() ? "The connection couldn't start."
-                                         : "The connection couldn't start (" + room_.error + ").");
-    } else if (!room_.tunnel.running()) {
-        room_.connected = false;
-        room_.left = true;
+                   : tunnel_room_.error.find("llena") != std::string::npos ? "That room is full."
+                   : tunnel_room_.error.empty() ? "The connection couldn't start."
+                                         : "The connection couldn't start (" + tunnel_room_.error + ").");
+    } else if (!tunnel_room_.tunnel.running()) {
+        tunnel_room_.connected = false;
+        tunnel_room_.left = true;
     }
 }
 
-void App::online_card(size_t which, float width) {
+void App::tunnel_card(size_t which, float width) {
     using ui::px;
     const ui::Palette& p = ui::palette();
     Slot& one = *slots_[which];
@@ -2143,8 +2144,8 @@ void App::online_card(size_t which, float width) {
     if (one.about->online.port == 0 || !tunnel) {
         return;
     }
-    bool here = room_.game == which;
-    bool elsewhere = room_.game != SIZE_MAX && !here;
+    bool here = tunnel_room_.game == which;
+    bool elsewhere = tunnel_room_.game != SIZE_MAX && !here;
     bool can = one.has_program() && !one.game.running() && !elsewhere;
     ui::gap(28);
     ui::text("ONLINE", Font::Semibold, ui::size::kDetail, p.secondary);
@@ -2189,40 +2190,40 @@ void App::online_card(size_t which, float width) {
     }
     // A room: where it stands, and the way out
     std::string status, detail;
-    if (!room_.error.empty() && !room_.connected) {
+    if (!tunnel_room_.error.empty() && !tunnel_room_.connected) {
         status = "Something went wrong with the connection";
-        detail = room_.error;
-    } else if (room_.connected) {
-        status = std::string(room_.relay ? "Connected through a relay" : "Connected (direct)") +
-                 (room_.ping >= 0 ? ", " + std::to_string(room_.ping) + " ms" : "");
-        detail = room_.host ? "You're player 1. The game started on both sides." : "You're player 2. The game started on both sides.";
-    } else if (room_.left) {
+        detail = tunnel_room_.error;
+    } else if (tunnel_room_.connected) {
+        status = std::string(tunnel_room_.relay ? "Connected through a relay" : "Connected (direct)") +
+                 (tunnel_room_.ping >= 0 ? ", " + std::to_string(tunnel_room_.ping) + " ms" : "");
+        detail = tunnel_room_.host ? "You're player 1. The game started on both sides." : "You're player 2. The game started on both sides.";
+    } else if (tunnel_room_.left) {
         status = "The other player left";
         detail = "Close the game, or leave, to play again.";
-    } else if (room_.host) {
-        status = room_.code.empty() ? "Opening the room…" : "Waiting for a player";
-        detail = room_.code.empty() ? "" : "Send this code to your friend (WhatsApp is fine):";
+    } else if (tunnel_room_.host) {
+        status = tunnel_room_.code.empty() ? "Opening the room…" : "Waiting for a player";
+        detail = tunnel_room_.code.empty() ? "" : "Send this code to your friend (WhatsApp is fine):";
     } else {
         status = "Connecting…";
     }
-    const char* way_out = room_.connected || room_.left || !room_.host ? "Leave" : "Close room";
+    const char* way_out = tunnel_room_.connected || tunnel_room_.left || !tunnel_room_.host ? "Leave" : "Close room";
     row(width, status.c_str(), detail.c_str(), 130.0f, 36.0f, [&] {
         if (ui::button(way_out, Kind::Secondary, 130.0f)) {
             close_room("");
         }
     });
-    if (room_.host && !room_.code.empty() && !room_.connected && !room_.left) {
+    if (tunnel_room_.host && !tunnel_room_.code.empty() && !tunnel_room_.connected && !tunnel_room_.left) {
         ImVec2 at = ImGui::GetCursorScreenPos();
         float text_width = width - pad * 2 - px(110 + 12);
         ImGui::SetCursorScreenPos(ImVec2(at.x + pad, at.y - px(2)));
         ImGui::BeginGroup();
-        ui::text(room_.code.c_str(), Font::Regular, ui::size::kDetail, p.text, text_width);
+        ui::text(tunnel_room_.code.c_str(), Font::Regular, ui::size::kDetail, p.text, text_width);
         ImGui::EndGroup();
         float bottom = ImGui::GetItemRectMax().y;
         ImGui::SetCursorScreenPos(ImVec2(at.x + width - pad - px(110), at.y - px(2)));
-        if (ui::button(room_.copied ? "Copied###copy" : "Copy###copy", Kind::Secondary, 110.0f)) {
-            SDL_SetClipboardText(room_.code.c_str());
-            room_.copied = true;
+        if (ui::button(tunnel_room_.copied ? "Copied###copy" : "Copy###copy", Kind::Secondary, 110.0f)) {
+            SDL_SetClipboardText(tunnel_room_.code.c_str());
+            tunnel_room_.copied = true;
         }
         bottom = std::max(bottom, ImGui::GetItemRectMax().y);
         ImGui::SetCursorScreenPos(ImVec2(at.x, bottom + px(14)));

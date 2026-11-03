@@ -266,12 +266,12 @@ private:
 
     // Online play (launcher::Description::Online): the ONLINE card, and one room at a time, its tunnel (cps-tunel
     // beside the launcher) and its game started together
-    void online_card(size_t which, float width);
+    void tunnel_card(size_t which, float width);
     void open_room(size_t which, bool host);
     void close_room(const std::string& message);  // (the game and the tunnel stopped; `message` shown on the card)
     void watch_room();                             // every frame: the tunnel's new lines, the game or the tunnel ended
     void room_line(const std::string& line);
-    struct Room {
+    struct TunnelRoom {
         size_t game = SIZE_MAX;    // the slot it is for (SIZE_MAX: no room)
         bool host = false;
         GameProcess tunnel;
@@ -285,7 +285,7 @@ private:
         int ping = -1;
         std::string error;
     };
-    Room room_;
+    TunnelRoom tunnel_room_;
     char room_code_[512] = {};       // what is pasted or typed in the card
     std::string room_message_;       // why the last room ended, or that a code isn't complete
     size_t room_message_for_ = SIZE_MAX;
@@ -354,6 +354,8 @@ private:
     std::vector<std::string> menu_choices_open_;  // the features whose choices for the game's menu are shown
 
     std::string steam_message_;  // what Add to Steam did
+    std::string desktop_message_;     // what Add shortcut did,
+    std::string desktop_message_id_;  // and for which game
     char online_address_[256] = {};  // the Online card's Join address (launcher.ini [online] address)
     bool online_loaded_ = false;
     std::vector<std::string> online_here_;  // this machine's addresses, as the Host row says them

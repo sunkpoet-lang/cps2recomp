@@ -939,7 +939,7 @@ void Port::AskSound(const uint8_t request[16]) {
 }
 
 void Port::ToggleSoundtrack(bool say) {
-    if (online) {
+    if (net || gekkoOnline) {
         notice = "No custom soundtrack online";
         noticeUntil = tick + 120;
         return;
@@ -1032,7 +1032,7 @@ uint32_t Port::StateHash() const {
 }
 
 void Port::MenuAct(Menu::Action action) {
-    if (online && action != Menu::Action::None && action != Menu::Action::Coin && action != Menu::Action::Quit) {
+    if (gekkoOnline && action != Menu::Action::None && action != Menu::Action::Coin && action != Menu::Action::Quit) {
         menu.Note("Not while playing online.");
         return;
     }
@@ -1522,6 +1522,7 @@ void Port::Shown(std::vector<uint32_t> &pixels, std::vector<SDL_Rect> *panels) c
     // (this fork) The music just switched over (F12): said for a moment, under where fighting games keep their bars
     // and timer
     if (!notice.empty() && tick < noticeUntil) {
+        const recomp::text::Canvas canvas{pixels.data(), across, Video::kHeight};
         const float width = recomp::text::TextWidth(notice.c_str(), 1);
         const float x = (across - width) / 2, y = 52;
         canvas.Fill(x - 3, y - 2, width + 6, 12, {20, 22, 30, 220});
