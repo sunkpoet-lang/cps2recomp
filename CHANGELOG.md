@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Board and Cheats choices from a game's `game.cfg`** (#163): a game can name its board's DIP switches
+  (`board_option_N`) and cheats that write to the work RAM (`cheat_N`, if wanted only while a value holds) in its
+  `game.cfg`. They go on the same Board and Cheats pages, into the same settings and the launcher's list as the
+  features a game's sources register; a name both give stops the game with a message. `tools/check_config_features.py`
+  checks the reading of them without a game. A game that declares none runs as before.
 - **Hyper Street Fighter II: The Anniversary Edition** (`hsf2`, USA 040202; the Asia and Japan sets of the same date
   play too): every character as they were in World Warrior, Champion Edition, Hyper Fighting, Super and Super Turbo,
   against each other, with everything the other fighting games have: training mode, the alternative modes (attract
