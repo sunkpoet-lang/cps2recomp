@@ -192,16 +192,43 @@ namespace {
     struct Places {
         std::vector<Zip> zips;
         std::string folder;
+        bool avspMirror = false;
     };
+
+
+    // ForkAde product import adapter: only the four verified AVSP upper graphics mirrors.
+    // Canonical sizes/checksums follow MAME cps2.cpp; no original file is written.
+    uint32_t AvspMirrorCRC(uint32_t canonical) {
+        switch (canonical) {
+        case 0x39933b1eu: return 0xebba093eu;
+        case 0x85412860u: return 0xfb228297u;
+        case 0x2e2beb06u: return 0x34fb7232u;
+        case 0xe4798d1au: return 0xf90baa21u;
+        default: return 0;
+        }
+    }
+
+    bool NormalizeAVSP(const Places &places, const RomFile &file, std::vector<uint8_t> &data) {
+        constexpr size_t half = 0x100000;
+        const uint32_t mirror = AvspMirrorCRC(file.crc);
+        if (!places.avspMirror || !mirror || data.size() != half * 2 ||
+            static_cast<uint32_t>(crc32(0, data.data(), static_cast<uInt>(data.size()))) != mirror ||
+            !std::equal(data.begin(), data.begin() + half, data.begin() + half) ||
+            static_cast<uint32_t>(crc32(0, data.data(), static_cast<uInt>(half))) != file.crc) {
+            return false;
+        }
+        data.resize(half);
+        return true;
+    }
 
     bool ReadFile(const Places &places, const RomFile &file, std::vector<uint8_t> &data, std::string &error) {
         for (const Zip &zip : places.zips) {
             for (const Zip::Entry &e : zip.entries) {
                 const size_t slash = e.name.find_last_of('/');
                 const std::string base = slash == std::string::npos ? e.name : e.name.substr(slash + 1);
-                if (file.crc ? e.crc == file.crc : base == file.name) {
+                if (file.crc ? (e.crc == file.crc || (places.avspMirror && AvspMirrorCRC(file.crc) && e.crc == AvspMirrorCRC(file.crc))) : base == file.name) {
                     if (zip.Read(e, data) &&
-                        (!file.crc || static_cast<uint32_t>(crc32(0, data.data(), static_cast<uInt>(data.size()))) == file.crc)) {
+                        (!file.crc || static_cast<uint32_t>(crc32(0, data.data(), static_cast<uInt>(data.size()))) == file.crc || NormalizeAVSP(places, file, data))) {
                         return true;
                     }
                     error = "could not unpack " + e.name + " from " + zip.path;
@@ -222,7 +249,7 @@ namespace {
             return false;
         }
         const uint32_t crc = static_cast<uint32_t>(crc32(0, data.data(), static_cast<uInt>(data.size())));
-        if (file.crc && crc != file.crc) {
+        if (file.crc && crc != file.crc && !NormalizeAVSP(places, file, data)) {
             char text[160];
             snprintf(text, sizeof(text), "%s is not the file this port is made from (CRC32 %08x, expected %08x)",
                      file.name.c_str(), crc, file.crc);
@@ -385,6 +412,7 @@ RomList ParseRomList(const char *program, const char *graphics, const char *soun
 bool LoadRomSet(const std::string &path, const RomList &list, RomSet &set, std::string &error) {
     std::vector<uint8_t> data;
     Places folder;
+    folder.avspMirror = list.set == "avsp" || list.set == "avspu" || list.set == "avspj" || list.set == "avspa" || list.set == "avsph";
     {
         std::error_code missing;
         const std::filesystem::file_status info = std::filesystem::status(PathOf(path), missing);
