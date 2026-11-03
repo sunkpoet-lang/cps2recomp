@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <type_traits>
 
 namespace cps2recomp {
 
@@ -29,7 +30,8 @@ struct Cps1Sound::Chips : public ymfm::ymfm_interface {
     ymfm::ym2151 ym;
     Okim6295 oki;
 
-    // What is kept in a save state
+    // What is kept in a save state (whole: the bytes after `irq` are a field, nought, not padding holding whatever
+    // the memory held, which made two boards' states differ from the first frame online)
     struct Times {
         uint64_t now = 0;                    // the time the YM2151's timers are counted from (WriteYm, RunTo)
         uint64_t timerAt[2] = {kNever, kNever};
@@ -42,7 +44,9 @@ struct Cps1Sound::Chips : public ymfm::ymfm_interface {
         int32_t ymLast = 0;
         int32_t okiPrev = 0, okiCur = 0;     // the OKI's last two samples
         bool irq = false;
+        uint8_t unused[7] = {};
     } t;
+    static_assert(std::has_unique_object_representations_v<Times>);
 
     // --- ymfm_interface ---
     void ymfm_set_timer(uint32_t tnum, int32_t duration) override {

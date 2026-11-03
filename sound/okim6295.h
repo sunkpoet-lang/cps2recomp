@@ -11,6 +11,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <type_traits>
 
 namespace cps2recomp {
 
@@ -39,8 +40,11 @@ public:
     void Serialize(Archive &ar);
 
 private:
+    // (kept in save states whole: the bytes after `playing` are a field, nought, not padding holding whatever the
+    // memory held, which would make two boards' states differ online)
     struct Voice {
         bool playing = false;
+        uint8_t unused[3] = {};
         uint32_t base = 0;   // the sample's first byte
         uint32_t nibble = 0; // nibbles played
         uint32_t count = 0;  // nibbles in the sample
@@ -48,6 +52,7 @@ private:
         int32_t step = 0;    // its place in the step table
         int32_t volume = 0;  // out of 32
     };
+    static_assert(std::has_unique_object_representations_v<Voice>);
     const uint8_t *m_rom;
     size_t m_romSize;
     Voice m_voice[4];
