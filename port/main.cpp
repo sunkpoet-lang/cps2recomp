@@ -1034,6 +1034,60 @@ bool Port::SaveState(const std::string &path, std::string &error) {
         error = "cannot write " + path;
         return false;
     }
+    // (and beside it a small picture of the game: each pixel the average of four by four of the board's)
+    const int across = ShownWidth(), w = across / 4, h = Video::kHeight / 4;
+    const uint32_t *picture = machine->Picture();
+    std::vector<uint32_t> small(static_cast<size_t>(w) * h);
+    for (int y = 0; y < h; y++) {
+        for (int x = 0; x < w; x++) {
+            uint32_t r = 0, g = 0, b = 0;
+            for (int dy = 0; dy < 4; dy++) {
+                for (int dx = 0; dx < 4; dx++) {
+                    const uint32_t p = picture[static_cast<size_t>(y * 4 + dy) * across + x * 4 + dx];
+                    r += p & 0xFF;
+                    g += (p >> 8) & 0xFF;
+                    b += (p >> 16) & 0xFF;
+                }
+            }
+            small[static_cast<size_t>(y) * w + x] = 0xFF000000u | ((b / 16) << 16) | ((g / 16) << 8) | (r / 16);
+        }
+    }
+    WritePng(StatePicture(path).c_str(), small.data(), static_cast<uint32_t>(w), static_cast<uint32_t>(h));
+    return true;
+}
+
+std::string Port::StatePicture(const std::string &statePath) {
+    const size_t dot = statePath.rfind('.');
+    const size_t slash = statePath.find_last_of("/\\");
+    return (dot != std::string::npos && (slash == std::string::npos || dot > slash) ? statePath.substr(0, dot) : statePath) + ".png";
+}
+
+bool Port::Screenshot(std::string &file, std::string &error) const {
+    namespace fs = std::filesystem;
+    const fs::path folder = TextPath(StatePath(1)).parent_path() / "screenshots";
+    std::error_code failed;
+    fs::create_directories(folder, failed);
+    // (GAME-YYYYMMDD-HHMMSS.png, and -2, -3... after it when there is one already)
+    SDL_Time now = 0;
+    SDL_DateTime t{};
+    SDL_GetCurrentTime(&now);
+    SDL_TimeToDateTime(now, &t, true);
+    char stamp[32];
+    snprintf(stamp, sizeof(stamp), "%04d%02d%02d-%02d%02d%02d", t.year, t.month, t.day, t.hour, t.minute, t.second);
+    fs::path path;
+    for (int n = 1;; n++) {
+        path = folder / (std::string(GAME_ID) + "-" + stamp + (n > 1 ? "-" + std::to_string(n) : std::string()) + ".png");
+        if (!fs::exists(path, failed)) {
+            break;
+        }
+    }
+    const std::string where = PathText(path);
+    WritePng(where.c_str(), machine->Picture(), static_cast<uint32_t>(ShownWidth()), Video::kHeight);
+    if (!fs::exists(path, failed)) {
+        error = "cannot write " + where;
+        return false;
+    }
+    file = PathText(path.filename());
     return true;
 }
 
@@ -1585,6 +1639,11 @@ void Usage() {
             "  --present-test F.png   (headless) the run's last picture drawn by the GPU path, no window, as the\n"
             "                         Display page has it (896x672 at 4:3)\n"
             "  --present-size WxH     ... in a window this big\n"
+            "  --present-bar [N]      ... with the menu bar's strip above the picture (as a window has it), and\n"
+            "                         its menu N (1: the first) open; N.K: and that menu's entry K's submenu\n"
+            "  --window-events S      (tests) events put to the window: LOOP:WHAT;... where WHAT is m X Y (the\n"
+            "                         mouse moved), l X Y / r X Y (a left / right click), k KEY (pressed and let go;\n"
+            "                         kd KEY, ku KEY: one of the two), p (what the window is doing, printed)\n"
                         "  --cpu-speed N          the 68000 N times as fast as the board's: the game is never short of time\n"
             "  --movie FILE           replay an input movie\n"
             "  --record FILE          record an input movie\n"
@@ -1665,6 +1724,10 @@ bool ParseArgs(int argc, char **argv, port::Options &o) {
             o.renderer = next();
         } else if (a == "--present-test") {
             o.presentTest = next();
+        } else if (a == "--window-events") {
+            o.windowEvents = next();
+        } else if (a == "--present-bar") {
+            o.presentBar = i + 1 < argc && argv[i + 1][0] >= '0' && argv[i + 1][0] <= '9' ? next() : "0";
         } else if (a == "--present-size") {
             const std::string v = next();
             o.presentWidth = atoi(v.c_str());
@@ -1952,10 +2015,36 @@ int main(int argc, char **argv) {
             const int outHeight = p.opt.presentHeight > 0 ? p.opt.presentHeight : 672;
             const int outWidth = p.opt.presentWidth > 0 ? p.opt.presentWidth
                                                         : static_cast<int>(std::lround(outHeight * port::PictureShape(across, Video::kHeight, port::DisplayShape(), 4.0f / 3.0f)));
-            const SDL_FRect where = port::FitPicture(outWidth, outHeight, across, Video::kHeight, port::DisplayShape(), port::DisplayScaling());
+            SDL_FRect where = port::FitPicture(outWidth, outHeight, across, Video::kHeight, port::DisplayShape(), port::DisplayScaling());
+            // (--present-bar: the window as tall again as the bar's strip, which is above the picture)
+            int windowHeight = outHeight;
+            std::vector<uint32_t> overlay;
+            std::vector<SDL_Rect> regions;
+            if (!p.opt.presentBar.empty()) {
+                const int dot = std::max(1, outHeight / Video::kHeight);
+                windowHeight = outHeight + recomp::MenuBar::kHeightDots * dot;
+                where.y += static_cast<float>(port::BarStrip(windowHeight));
+                recomp::MenuBar bar;
+                port::BarMenus(p, bar, false);
+                bar.SetArea(outWidth, windowHeight, port::BarDot(windowHeight));
+                // (N: that menu open; N.K: and its entry K's submenu, counted as the keys go, past lines and dim ones)
+                const int open = atoi(p.opt.presentBar.c_str());
+                const size_t sub = p.opt.presentBar.find('.');
+                if (open > 0) {
+                    bar.OpenMenu(static_cast<size_t>(open - 1));
+                    if (sub != std::string::npos) {
+                        for (int k = atoi(p.opt.presentBar.c_str() + sub + 1); k > 1; k--) {
+                            bar.Buttons(recomp::kMenuDown);
+                        }
+                        bar.Buttons(recomp::kMenuRight);
+                    }
+                }
+                port::BarPicture(bar, outWidth, windowHeight, overlay, regions);
+            }
             if (SDL_Init(SDL_INIT_VIDEO) &&
-                port::Presenter::Render(shown.data(), across, Video::kHeight, outWidth, outHeight, where, port::DisplayScaling(), drawn, error)) {
-                WritePng(p.opt.presentTest.c_str(), drawn.data(), outWidth, outHeight);
+                port::Presenter::Render(shown.data(), across, Video::kHeight, outWidth, windowHeight, where, port::DisplayScaling(), drawn, error,
+                                        regions.empty() ? nullptr : &overlay, regions.empty() ? nullptr : &regions)) {
+                WritePng(p.opt.presentTest.c_str(), drawn.data(), outWidth, windowHeight);
             } else {
                 fprintf(stderr, "--present-test: %s\n", error.empty() ? SDL_GetError() : error.c_str());
                 result = 1;

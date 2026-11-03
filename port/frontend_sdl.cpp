@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <filesystem>
 
 using namespace cps2recomp;
 
@@ -90,7 +91,141 @@ namespace {
         return pad;
     }
 
+    // The menu bar's own entries (the in-game menu's have ids of their own: recomp::IsMenuEntry)
+    enum { kBarQuickSave = 1, kBarQuickLoad, kBarFullscreen, kBarAbout, kBarKey, kBarScreenshot };
+
+    // The keys that work while playing, for Help's list (each an entry that does nothing)
+    const char *const kKeys[][2] = {
+        {"In-game menu", "Esc, F1"}, {"Menu bar", "F10, Alt"},  {"Quick save", "F5"},        {"Quick load", "F9"},
+        {"Screenshot", "F8"},
+        {"Slot before, next", "F6, F7"}, {"Fullscreen", "F11"},   {"Soundtrack", "F12"},       {"Test switch", "F2"},
+        {"Pause", "P"},               {"One frame", "O"},          {"Slower, faster", "-, ="}, {"Restart", "Backspace"},
+    };
+
+    recomp::BarEntry BarItem(const char *label, int id, const char *shortcut = "", bool enabled = true) {
+        recomp::BarEntry e;
+        e.label = label;
+        e.id = id;
+        e.shortcut = shortcut;
+        e.enabled = enabled;
+        return e;
+    }
+
 } // namespace
+
+void BarMenus(Port &port, recomp::MenuBar &bar, bool fullscreen) {
+    std::vector<recomp::BarMenu> menus = {{"Game", {}}, {"Video", {}}, {"Audio", {}}, {"Input", {}}, {"Features", {}}, {"Help", {}}};
+    std::error_code error;
+    recomp::BarOptions options;
+    options.slotUsed = [&](int slot) { return std::filesystem::exists(port.StatePath(slot), error); };
+    // (a slot kept says when: the time today, the date before)
+    options.slotDetail = [&](int slot) -> std::string {
+        SDL_PathInfo info{};
+        SDL_Time now = 0;
+        SDL_DateTime then{}, today{};
+        if (!SDL_GetPathInfo(port.StatePath(slot).c_str(), &info) || info.type != SDL_PATHTYPE_FILE || !SDL_GetCurrentTime(&now) ||
+            !SDL_TimeToDateTime(info.modify_time, &then, true) || !SDL_TimeToDateTime(now, &today, true)) {
+            return "";
+        }
+        char text[24];
+        if (then.year == today.year && then.month == today.month && then.day == today.day) {
+            snprintf(text, sizeof(text), "%02d:%02d", then.hour, then.minute);
+        } else {
+            snprintf(text, sizeof(text), "%04d-%02d-%02d", then.year, then.month, then.day);
+        }
+        return text;
+    };
+    port.menu.AddBarEntries(menus, true, options);
+    // (and its small picture, where one was kept with it)
+    for (recomp::BarEntry &entry : menus[0].entries) {
+        if (entry.label != "Save state" && entry.label != "Load state") {
+            continue;
+        }
+        for (size_t i = 0; i < entry.children.size(); i++) {
+            SDL_Surface *loaded = SDL_LoadPNG(Port::StatePicture(port.StatePath(static_cast<int>(i) + 1)).c_str());
+            SDL_Surface *picture = loaded ? SDL_ConvertSurface(loaded, SDL_PIXELFORMAT_XBGR8888) : nullptr;
+            if (picture) {
+                recomp::BarEntry &slot = entry.children[i];
+                slot.pictureWidth = picture->w;
+                slot.pictureHeight = picture->h;
+                slot.picture.resize(static_cast<size_t>(picture->w) * picture->h);
+                for (int y = 0; y < picture->h; y++) {
+                    memcpy(&slot.picture[static_cast<size_t>(y) * picture->w], static_cast<const uint8_t *>(picture->pixels) + y * picture->pitch,
+                           static_cast<size_t>(picture->w) * 4);
+                }
+                SDL_DestroySurface(picture);
+            }
+            if (loaded) {
+                SDL_DestroySurface(loaded);
+            }
+        }
+    }
+    // Game: the quick save and load (F5, F9) after the save states
+    std::vector<recomp::BarEntry> &game = menus[0].entries;
+    auto slot = std::find_if(game.begin(), game.end(), [](const recomp::BarEntry &e) { return e.label == "Slot"; });
+    const size_t after = slot == game.end() ? 0 : static_cast<size_t>(slot - game.begin()) + 1;
+    game.insert(game.begin() + static_cast<std::ptrdiff_t>(after),
+                {recomp::BarEntry::Line(), BarItem("Quick save", kBarQuickSave, "F5"),
+                 BarItem("Quick load", kBarQuickLoad, "F9", options.slotUsed(port.menu.Slot())), BarItem("Screenshot", kBarScreenshot, "F8")});
+    // Video: full screen (F11, Alt+Enter)
+    std::vector<recomp::BarEntry> &video = menus[1].entries;
+    if (!video.empty()) {
+        video.push_back(recomp::BarEntry::Line());
+    }
+    video.push_back(BarItem("Fullscreen", kBarFullscreen, "F11"));
+    video.back().mark = fullscreen ? recomp::BarEntry::Check : recomp::BarEntry::NoMark;
+    // Input: the controls are the launcher's (its Controllers page)
+    menus[3].entries.push_back(recomp::BarEntry::Line());
+    menus[3].entries.push_back(BarItem("Controls: in the launcher", 0, "", false));
+    // Help: the keys, and what this is
+    recomp::BarEntry keys = BarItem("Keys", 0);
+    for (const auto &key : kKeys) {
+        keys.children.push_back(BarItem(key[0], kBarKey, key[1]));
+    }
+    menus[5].entries.push_back(std::move(keys));
+    menus[5].entries.push_back(BarItem("About", kBarAbout));
+    // Online, what would change the match or put the two boards out of step is dim (as the in-game menu says
+    // "Not while playing online"): the save states, Reset, player 2's Start, the game's features and its speed
+    if (port.online) {
+        for (recomp::BarMenu &menu : menus) {
+            for (recomp::BarEntry &entry : menu.entries) {
+                const std::string &l = entry.label;
+                if (menu.title == "Features" || l == "Save state" || l == "Load state" || l == "Quick save" || l == "Quick load" ||
+                    l == "Reset" || l == "Player 2 joins") {
+                    entry.enabled = false;
+                }
+            }
+        }
+    }
+    // (a menu with nothing in it is left out)
+    menus.erase(std::remove_if(menus.begin(), menus.end(), [](const recomp::BarMenu &m) { return m.entries.empty(); }), menus.end());
+    bar.Configure(std::move(menus));
+
+}
+
+int BarDot(int windowHeight) {
+    // (a window opens the board's lines and the bar's dots tall, so many times: a dot is as many pixels)
+    return std::max(1, windowHeight / (Video::kHeight + recomp::MenuBar::kHeightDots));
+}
+
+int BarStrip(int windowHeight) {
+    return recomp::MenuBar::kHeightDots * BarDot(windowHeight);
+}
+
+void BarPicture(const recomp::MenuBar &bar, int width, int height, std::vector<uint32_t> &pixels, std::vector<SDL_Rect> &regions) {
+    pixels.assign(static_cast<size_t>(std::max(width, 0)) * std::max(height, 0), 0xFF000000u);
+    regions.clear();
+    if (width <= 0 || height <= 0) {
+        return;
+    }
+    bar.Draw(pixels.data(), width, height);
+    if (bar.BarShown()) {
+        regions.push_back({0, 0, width, bar.Height()});
+    }
+    for (const recomp::MenuBar::Box &box : bar.Boxes()) {
+        regions.push_back({static_cast<int>(box.x), static_cast<int>(box.y), static_cast<int>(std::ceil(box.w)), static_cast<int>(std::ceil(box.h))});
+    }
+}
 
 int RunWindowed(Port &port) {
     SDL_SetHint(SDL_HINT_AUDIO_DEVICE_SAMPLE_FRAMES, "256");
@@ -113,7 +248,9 @@ int RunWindowed(Port &port) {
     // much wider as the widest picture the game's sources may ask for; 4:3 for a picture that fills it)
     const int columns = TheGame().widestPicture ? std::clamp(TheGame().widestPicture(), +Video::kWidth, +Video::kMaxWidth) : Video::kWidth;
     auto windowShape = [](int across) { return PictureShape(across, Video::kHeight, DisplayShape(), 4.0f / 3.0f * across / Video::kWidth); };
-    SDL_Window *window = SDL_CreateWindow(title, static_cast<int>(std::lround(Video::kHeight * scale * windowShape(columns))), Video::kHeight * scale,
+    // (and above the picture the menu bar's strip, as many times its dots: none full screen)
+    const int strip = port.opt.fullscreen ? 0 : recomp::MenuBar::kHeightDots * scale;
+    SDL_Window *window = SDL_CreateWindow(title, static_cast<int>(std::lround(Video::kHeight * scale * windowShape(columns))), Video::kHeight * scale + strip,
                                           SDL_WINDOW_RESIZABLE | (port.opt.fullscreen ? SDL_WINDOW_FULLSCREEN : 0) |
                                               (getenv("CPS2RECOMP_HIDDEN_WINDOW") ? SDL_WINDOW_HIDDEN : 0)); // (hidden: for tests)
     // The picture goes to the window through SDL's GPU API, or through SDL's renderer where there is no
@@ -194,6 +331,123 @@ int RunWindowed(Port &port) {
             fprintf(stderr, "state %d: %s\n", port.menu.Slot(), error.c_str());
         }
     };
+    // The menu bar above the picture, and the same menus where the picture is right-clicked (port.h's Bar...).
+    // While one of its menus is open the game stands still, as with the in-game menu; a click or a key that
+    // works the bar does not reach the game.
+    recomp::MenuBar bar;
+    std::vector<uint32_t> barPixels;
+    std::vector<SDL_Rect> barRegions;
+    bool barDirty = true;
+    int barWidth = 0, barHeight = 0;
+    auto isFullscreen = [&]() { return (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) != 0; };
+    // Full screen there is no strip: the bar is drawn over the top of the picture while the pointer is at the
+    // screen's top edge, or one of its menus is open (not the right-click menu's, which needs no bar)
+    bool barRevealed = false, barPopup = false;
+    auto showBar = [&]() {
+        const bool shown = !isFullscreen() || barRevealed || (bar.IsOpen() && !barPopup);
+        if (shown != bar.BarShown()) {
+            bar.ShowBar(shown);
+            barDirty = true;
+        }
+    };
+    // (no wider than the board's picture says: 64 of its letters)
+    const std::string kFullscreenHint = "F11 leaves full screen. Menu: top edge, right click, F10";
+    auto fullscreenHint = [&]() {
+        port.notice = kFullscreenHint;
+        port.noticeUntil = port.tick + 300;
+    };
+    auto toggleFullscreen = [&]() {
+        const bool to = !isFullscreen();
+        SDL_SetWindowFullscreen(window, to);
+        barRevealed = false;
+        if (to) {
+            fullscreenHint();
+        } else if (port.notice == kFullscreenHint) {
+            port.noticeUntil = 0; // (back in a window, the hint has nothing to say)
+        }
+        barDirty = true;
+    };
+    if (port.opt.fullscreen) {
+        fullscreenHint();
+    }
+    auto barOpened = [&](bool popup = false) {
+        BarMenus(port, bar, isFullscreen());
+        barPopup = popup;
+        barDirty = true;
+    };
+    BarMenus(port, bar, isFullscreen());
+    auto screenshot = [&]() {
+        std::string file, error;
+        if (port.Screenshot(file, error)) {
+            port.notice = "Screenshot: " + file;
+        } else {
+            port.notice = "No screenshot: " + error;
+            fprintf(stderr, "screenshot: %s\n", error.c_str());
+        }
+        port.noticeUntil = port.tick + 150;
+    };
+    auto barChose = [&](const recomp::MenuBar::Chosen &chosen) {
+        barDirty = true;
+        heldAtClose = previousPad;
+        if (!chosen.chosen) {
+            return;
+        }
+        if (recomp::IsMenuEntry(chosen.id)) {
+            port.MenuAct(port.menu.Choose(chosen.id));
+        } else if (chosen.id == kBarQuickSave || chosen.id == kBarQuickLoad) {
+            quickState(chosen.id == kBarQuickSave);
+        } else if (chosen.id == kBarFullscreen) {
+            toggleFullscreen();
+        } else if (chosen.id == kBarScreenshot) {
+            screenshot();
+        } else if (chosen.id == kBarAbout) {
+            port.notice = std::string(title) + " - ForkAde, a native port by static recompilation (cps2recomp)";
+            port.noticeUntil = port.tick + 240;
+        }
+        BarMenus(port, bar, isFullscreen());
+    };
+    // (the pointer's place in the window's pixels: events give it in the window's points)
+    auto pixelsOf = [&](float x, float y, float &px, float &py) {
+        const float density = SDL_GetWindowPixelDensity(window);
+        px = x * (density > 0 ? density : 1.0f);
+        py = y * (density > 0 ? density : 1.0f);
+    };
+    // (tests: --window-events, what is put to the window at which turn of the loop; a turn is a frame, or a
+    // wait of the menus')
+    struct Scripted {
+        uint64_t loop;
+        std::string what;
+        float x = 0, y = 0;
+        std::string key;
+    };
+    std::vector<Scripted> script;
+    for (size_t at = 0; at < port.opt.windowEvents.size();) {
+        size_t end = port.opt.windowEvents.find(';', at);
+        if (end == std::string::npos) {
+            end = port.opt.windowEvents.size();
+        }
+        const std::string one = port.opt.windowEvents.substr(at, end - at);
+        const size_t colon = one.find(':');
+        if (colon != std::string::npos) {
+            Scripted s{strtoull(one.c_str(), nullptr, 10), {}};
+            char what[8] = {};
+            if (sscanf(one.c_str() + colon + 1, "%7s %f %f", what, &s.x, &s.y) >= 1) {
+                s.what = what;
+                // (a key's name is the rest: "Left Alt")
+                const size_t space = one.find(' ', colon + 1);
+                if (space != std::string::npos) {
+                    s.key = one.substr(space + 1);
+                }
+                script.push_back(s);
+            }
+        }
+        at = end + 1;
+    }
+    uint64_t loops = 0;
+    // The pointer is hidden over the game after a moment still, and seen again when it moves
+    uint64_t pointerMoved = SDL_GetTicksNS();
+    bool pointerShown = true;
+    bool altAlone = false; // (Alt went down, and nothing else since: let go, it opens the bar's Game menu)
     const double kFrameNs = 1e9 / Machine::kFramesPerSecond;
     uint64_t nextFrame = SDL_GetTicksNS();
 
@@ -223,12 +477,152 @@ int RunWindowed(Port &port) {
     };
     bool running = true;
     while (running && !port.quit && (port.opt.frames == 0 || port.frame < port.opt.frames)) {
+        for (const Scripted &s : script) {
+            if (s.loop != loops) {
+                continue;
+            }
+            SDL_Event put{};
+            const SDL_WindowID id = SDL_GetWindowID(window);
+            if (s.what == "m") {
+                put.type = SDL_EVENT_MOUSE_MOTION;
+                put.motion.windowID = id;
+                put.motion.x = s.x;
+                put.motion.y = s.y;
+                SDL_PushEvent(&put);
+            } else if (s.what == "l" || s.what == "r") {
+                put.button.windowID = id;
+                put.button.button = s.what == "l" ? SDL_BUTTON_LEFT : SDL_BUTTON_RIGHT;
+                put.button.x = s.x;
+                put.button.y = s.y;
+                put.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+                put.button.down = true;
+                SDL_PushEvent(&put);
+                put.type = SDL_EVENT_MOUSE_BUTTON_UP;
+                put.button.down = false;
+                SDL_PushEvent(&put);
+            } else if (s.what == "k" || s.what == "kd" || s.what == "ku") {
+                put.key.windowID = id;
+                put.key.scancode = SDL_GetScancodeFromName(s.key.c_str());
+                put.key.key = SDL_GetKeyFromScancode(put.key.scancode, SDL_KMOD_NONE, false);
+                if (s.what != "ku") {
+                    put.type = SDL_EVENT_KEY_DOWN;
+                    put.key.down = true;
+                    SDL_PushEvent(&put);
+                }
+                if (s.what != "kd") {
+                    put.type = SDL_EVENT_KEY_UP;
+                    put.key.down = false;
+                    SDL_PushEvent(&put);
+                }
+            } else if (s.what == "p") {
+                int windowWidth = 0, windowHeight = 0;
+                SDL_GetWindowSize(window, &windowWidth, &windowHeight);
+                std::string picked;
+                for (const int p : bar.Picked()) {
+                    picked += (picked.empty() ? "" : ",") + std::to_string(p);
+                }
+                printf("window %llu: bar %s [%s] (%zu open, strip %s), in-game menu %s, frame %llu, player 1 %04x, pointer %s, "
+                       "fullscreen %s, window %dx%d, slot %d, muted %s, slow by %d, notice \"%s\", online %s\"%s\"\n",
+                       static_cast<unsigned long long>(loops), bar.IsOpen() ? "open" : "closed", picked.c_str(), bar.Boxes().size(), bar.BarShown() ? "shown" : "hidden",
+                       port.menu.IsOpen() ? "open" : "closed", static_cast<unsigned long long>(port.frame), port.pad[0],
+                       pointerShown ? "shown" : "hidden", isFullscreen() ? "yes" : "no", windowWidth, windowHeight, port.menu.Slot(), port.menu.muted ? "yes" : "no",
+                       port.menu.SlowBy(), port.tick < port.noticeUntil ? port.notice.c_str() : "", online.Failed() ? "FAILED " : "",
+                       online.Message().c_str());
+                fflush(stdout);
+            }
+        }
+        loops++;
         SDL_Event ev;
         while (SDL_PollEvent(&ev)) {
             switch (ev.type) {
             case SDL_EVENT_QUIT: running = false; break;
+            case SDL_EVENT_WINDOW_FOCUS_LOST: altAlone = false; break;
+            case SDL_EVENT_MOUSE_MOTION:
+                pointerMoved = SDL_GetTicksNS();
+                if (!pointerShown) {
+                    SDL_ShowCursor();
+                    pointerShown = true;
+                }
+                {
+                    float x, y;
+                    pixelsOf(ev.motion.x, ev.motion.y, x, y);
+                    if (isFullscreen()) {
+                        // (at the top edge the bar comes; below it, with none of its menus open, it goes)
+                        if (y < 4) {
+                            barRevealed = true;
+                        } else if (y >= bar.Height() && !bar.IsOpen()) {
+                            barRevealed = false;
+                        }
+                        showBar();
+                    }
+                    if (bar.IsOpen() && !port.menu.IsOpen()) {
+                        barDirty = bar.Pointer(x, y) || barDirty;
+                    }
+                }
+                break;
+            case SDL_EVENT_MOUSE_BUTTON_DOWN:
+                if (!port.menu.IsOpen()) {
+                    float x, y;
+                    pixelsOf(ev.button.x, ev.button.y, x, y);
+                    if (ev.button.button == SDL_BUTTON_LEFT && (bar.IsOpen() || bar.Hit(x, y))) {
+                        if (!bar.IsOpen()) {
+                            barOpened();
+                        }
+                        barChose(bar.Click(x, y));
+                    } else if (ev.button.button == SDL_BUTTON_RIGHT) {
+                        barOpened(true);
+                        bar.OpenPopup(x, y);
+                    } else if (bar.IsOpen()) {
+                        bar.Close();
+                        barDirty = true;
+                    }
+                }
+                break;
+            case SDL_EVENT_KEY_UP:
+                if ((ev.key.scancode == SDL_SCANCODE_LALT || ev.key.scancode == SDL_SCANCODE_RALT) && altAlone &&
+                    !KeyBound(ev.key.scancode) && !port.menu.IsOpen()) {
+                    if (bar.IsOpen()) {
+                        bar.Close();
+                        barDirty = true;
+                    } else {
+                        barOpened();
+                        bar.OpenMenu(0);
+                    }
+                }
+                altAlone = false;
+                break;
             case SDL_EVENT_KEY_DOWN:
-                if (ev.key.scancode == SDL_SCANCODE_ESCAPE || ev.key.scancode == SDL_SCANCODE_F1 || (ev.key.scancode == SDL_SCANCODE_TAB && !KeyBound(SDL_SCANCODE_TAB))) {
+                if (!ev.key.repeat) {
+                    altAlone = ev.key.scancode == SDL_SCANCODE_LALT || ev.key.scancode == SDL_SCANCODE_RALT;
+                }
+                if (bar.IsOpen() && ev.key.scancode == SDL_SCANCODE_ESCAPE) {
+                    barChose(bar.Buttons(recomp::kMenuBack)); // (a level of the bar's menus closes)
+                } else if (bar.IsOpen() && !port.menu.IsOpen() && ev.key.scancode != SDL_SCANCODE_F10) {
+                    // While the bar's menu is open the keys work it, and nothing else (the gamepad: below)
+                    unsigned button = 0;
+                    switch (ev.key.scancode) {
+                    case SDL_SCANCODE_UP: button = recomp::kMenuUp; break;
+                    case SDL_SCANCODE_DOWN: button = recomp::kMenuDown; break;
+                    case SDL_SCANCODE_LEFT: button = recomp::kMenuLeft; break;
+                    case SDL_SCANCODE_RIGHT: button = recomp::kMenuRight; break;
+                    case SDL_SCANCODE_RETURN:
+                    case SDL_SCANCODE_KP_ENTER:
+                    case SDL_SCANCODE_SPACE: button = (ev.key.mod & SDL_KMOD_ALT) ? 0 : recomp::kMenuConfirm; break;
+                    case SDL_SCANCODE_BACKSPACE: button = recomp::kMenuBack; break;
+                    default: break;
+                    }
+                    if (button) {
+                        barChose(bar.Buttons(button));
+                    }
+                } else if (ev.key.scancode == SDL_SCANCODE_F10 && !KeyBound(SDL_SCANCODE_F10) && !port.menu.IsOpen()) {
+                    if (bar.IsOpen()) {
+                        bar.Close();
+                        barDirty = true;
+                    } else {
+                        barOpened();
+                        bar.OpenMenu(0);
+                    }
+                } else if (ev.key.scancode == SDL_SCANCODE_ESCAPE || ev.key.scancode == SDL_SCANCODE_F1 || (ev.key.scancode == SDL_SCANCODE_TAB && !KeyBound(SDL_SCANCODE_TAB))) {
                     toggleMenu();
                 } else if (KeyBound(ev.key.scancode)) {
                     // (a key the player has given to the game does only that)
@@ -236,6 +630,10 @@ int RunWindowed(Port &port) {
                     // F5 keeps the game in the slot, F9 goes back to it; F6 / F7: the slot before, the next
                     if (!port.menu.IsOpen()) {
                         quickState(ev.key.scancode == SDL_SCANCODE_F5);
+                    }
+                } else if (ev.key.scancode == SDL_SCANCODE_F8 && !ev.key.repeat) {
+                    if (!port.menu.IsOpen()) {
+                        screenshot(); // the board's picture, as it is now
                     }
                 } else if (ev.key.scancode == SDL_SCANCODE_F6 || ev.key.scancode == SDL_SCANCODE_F7) {
                     port.menu.SetSlot(port.menu.Slot() + (ev.key.scancode == SDL_SCANCODE_F7 ? 1 : -1));
@@ -253,7 +651,7 @@ int RunWindowed(Port &port) {
                     port.test = !port.test; // the operator's test switch
                 } else if (ev.key.scancode == SDL_SCANCODE_F11 ||
                            (ev.key.scancode == SDL_SCANCODE_RETURN && (ev.key.mod & SDL_KMOD_ALT))) {
-                    SDL_SetWindowFullscreen(window, !(SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN));
+                    toggleFullscreen();
                 } else if (ev.key.scancode == SDL_SCANCODE_F12 && !ev.key.repeat) {
                     port.ToggleSoundtrack(true); // the custom soundtrack or the board's music, at once
                 }
@@ -335,7 +733,7 @@ int RunWindowed(Port &port) {
             bothHeld = both;
             // The menu's buttons are the same whatever the game's are set to: the arrows, the d-pad and the
             // left stick (and the game's own directions); Space, Enter and A choose; Backspace and B go back
-            unsigned menuNow = 0;
+            unsigned menuNow = 0, padMenu = 0;
             menuNow |= (previousPad & kUp) || keys[SDL_SCANCODE_UP] ? recomp::kMenuUp : 0;
             menuNow |= (previousPad & kDown) || keys[SDL_SCANCODE_DOWN] ? recomp::kMenuDown : 0;
             menuNow |= (previousPad & kLeft) || keys[SDL_SCANCODE_LEFT] ? recomp::kMenuLeft : 0;
@@ -350,12 +748,27 @@ int RunWindowed(Port &port) {
                 menuNow |= SDL_GetGamepadButton(gp, SDL_GAMEPAD_BUTTON_SOUTH) ? recomp::kMenuConfirm : 0;
                 menuNow |= SDL_GetGamepadButton(gp, SDL_GAMEPAD_BUTTON_EAST) ? recomp::kMenuBack : 0;
             }
+            // (the gamepad's part of it)
+            for (SDL_Gamepad *gp : gamepads) {
+                padMenu |= SDL_GetGamepadButton(gp, SDL_GAMEPAD_BUTTON_DPAD_UP) ? recomp::kMenuUp : 0;
+                padMenu |= SDL_GetGamepadButton(gp, SDL_GAMEPAD_BUTTON_DPAD_DOWN) ? recomp::kMenuDown : 0;
+                padMenu |= SDL_GetGamepadButton(gp, SDL_GAMEPAD_BUTTON_DPAD_LEFT) ? recomp::kMenuLeft : 0;
+                padMenu |= SDL_GetGamepadButton(gp, SDL_GAMEPAD_BUTTON_DPAD_RIGHT) ? recomp::kMenuRight : 0;
+                padMenu |= SDL_GetGamepadButton(gp, SDL_GAMEPAD_BUTTON_SOUTH) ? recomp::kMenuConfirm : 0;
+                padMenu |= SDL_GetGamepadButton(gp, SDL_GAMEPAD_BUTTON_EAST) ? recomp::kMenuBack : 0;
+            }
             unsigned menuPressed = menuNow & ~previousMenu;
             previousMenu = menuNow;
             if (both) {
                 menuPressed = 0;
             }
-            if (port.menu.IsOpen()) {
+            if (bar.IsOpen() && !port.menu.IsOpen()) {
+                // (the gamepad's presses: the keys' came as events)
+                if (menuPressed & padMenu) {
+                    barChose(bar.Buttons(menuPressed & padMenu));
+                }
+                heldAtClose = previousPad;
+            } else if (port.menu.IsOpen()) {
                 if (menuPressed) {
                     port.MenuAct(port.menu.Press(menuPressed));
                     menuDirty = true;
@@ -384,10 +797,14 @@ int RunWindowed(Port &port) {
                 if (!(SDL_GetWindowFlags(window) & (SDL_WINDOW_FULLSCREEN | SDL_WINDOW_MAXIMIZED))) {
                     int windowWidth = 0, windowHeight = 0;
                     SDL_GetWindowSize(window, &windowWidth, &windowHeight);
+                    // (the picture's part of it: below the bar's strip, in the window's points)
+                    const float density = SDL_GetWindowPixelDensity(window) > 0 ? SDL_GetWindowPixelDensity(window) : 1.0f;
+                    int pictureHeight = windowHeight - static_cast<int>(std::lround(BarStrip(static_cast<int>(windowHeight * density)) / density));
                     if (size != shownSize) {
-                        windowHeight = Video::kHeight * size;
+                        pictureHeight = Video::kHeight * size;
+                        windowHeight = pictureHeight + recomp::MenuBar::kHeightDots * size;
                     }
-                    SDL_SetWindowSize(window, static_cast<int>(std::lround(windowHeight * windowShape(now))), windowHeight);
+                    SDL_SetWindowSize(window, static_cast<int>(std::lround(pictureHeight * windowShape(now))), windowHeight);
                 }
                 shownColumns = now;
                 shownShape = DisplayShape();
@@ -398,7 +815,43 @@ int RunWindowed(Port &port) {
         int width = 0, height = 0;
         presenter.Size(width, height);
         presenter.SetScaling(DisplayScaling());
-        const SDL_FRect where = FitPicture(width, height, port.ShownWidth(), Video::kHeight, DisplayShape(), DisplayScaling());
+        // (in a window, below the menu bar's strip; full screen, the whole screen)
+        if (pointerShown && !bar.IsOpen() && !port.menu.IsOpen() && SDL_GetTicksNS() - pointerMoved > 2000000000ull) {
+            SDL_HideCursor();
+            pointerShown = false;
+        }
+        const bool fullscreen = isFullscreen();
+        const int barStrip = fullscreen ? 0 : BarStrip(height);
+        SDL_FRect where = FitPicture(width, height - barStrip, port.ShownWidth(), Video::kHeight, DisplayShape(), DisplayScaling());
+        where.y += barStrip;
+        showBar();
+        if (barDirty || width != barWidth || height != barHeight) {
+            bar.SetArea(width, height, BarDot(height));
+            BarPicture(bar, width, height, barPixels, barRegions);
+            presenter.SetOverlay(barPixels, width, height, barRegions);
+            barDirty = false;
+            barWidth = width;
+            barHeight = height;
+        }
+        if (bar.IsOpen() && !port.menu.IsOpen()) {
+            // The game's picture as it was, with the bar's menu open over it
+            if (shown.empty()) {
+                port.Shown(shown);
+            }
+            presenter.Show(shown.data(), port.ShownWidth(), Video::kHeight, where);
+            if (isOnline) {
+                // (online, the game goes on behind the menu, as behind the in-game menu: this side's controls let go,
+                // unheard; the picture shown is the one the menu opened on)
+                const uint16_t none[2] = {};
+                online.Tick(none);
+                port.machine->audio.clear();
+                pace();
+                continue;
+            }
+            SDL_Delay(8);
+            nextFrame = SDL_GetTicksNS();
+            continue;
+        }
 
         if (port.menu.IsOpen()) {
             // The game's picture as it was, with the menu over it
