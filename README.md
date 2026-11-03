@@ -127,6 +127,27 @@ While playing, Esc or `F1` (on a gamepad, the left stick's click, or Start and S
 in-game menu. Only the menu's "Quit game" row (or closing the window) ends the game. `F12` switches between a
 [custom soundtrack](#a-custom-soundtrack) and the board's music.
 
+In a window the game also has a **menu bar** above the picture (Game, Video, Audio, Input, Features, Help) for the
+mouse: the same choices as the in-game menu, and the window's own (its size, full screen, screenshots). Right-click
+the picture for the same menus where you click; `F10`, or Alt pressed and let go on its own, opens Game. While one of
+its menus is open the game stands still (online it goes on, and what would change the match is dim). Full screen has
+no bar until the pointer reaches the top edge. The keys while playing:
+
+| Key | Does |
+| --- | --- |
+| Esc, `F1` | the in-game menu |
+| `F10`, Alt | the menu bar's Game menu |
+| `F5`, `F9` | quick save, quick load (the slot chosen; `F6` and `F7` the slot before and after) |
+| `F8` | a screenshot, beside the save states in `screenshots/` |
+| `F11`, Alt+Enter | full screen |
+| `F12` | the custom soundtrack or the board's music |
+| `F2` | the board's test switch (its operator menu) |
+| `P`, `O` | stop and start again, one frame on |
+| `-`, `=` | slower, faster |
+| Backspace | the game's restart command |
+
+A key you give to the game in the Controllers page does only that.
+
 macOS: the app is not notarized, so the first time, right-click it and choose Open.
 Linux: unpack the archive anywhere and run `cps2recomp-launcher`.
 Windows: run `cps2recomp-launcher.exe`. Opening a game's own program (`sfa2.exe`, say) starts the launcher too,
