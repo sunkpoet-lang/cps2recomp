@@ -12,6 +12,9 @@
   (`/be`), graphics files joined in groups (`+`), and its sound, the Z80 with a YM2151 ([ymfm](third_party/), the
   second named exception of rule 4) and an OKI MSM6295, all of it in the save state (version 10). The CPS-1 games
   with QSound and the CPS-2 games play as before.
+- **Street Fighter II: Champion Edition, Street Fighter II: Hyper Fighting and Ghouls'n Ghosts** (#163): the first
+  classic CPS-1 games, with their music and voices, the Board page and cheats from their `game.cfg`, and input
+  movies for the checks. Ghouls'n Ghosts is the collection's first platformer.
 - **Hyper Street Fighter II: The Anniversary Edition** (`hsf2`, USA 040202; the Asia and Japan sets of the same date
   play too): every character as they were in World Warrior, Champion Edition, Hyper Fighting, Super and Super Turbo,
   against each other, with everything the other fighting games have: training mode, the alternative modes (attract
