@@ -142,24 +142,29 @@ None of these is stored in this repository.
 
 | Component | License | Used for |
 | --- | --- | --- |
-| [SDL 3](https://libsdl.org) | zlib. Copyright (C) 1997-2026 Sam Lantinga | Window, input, audio, GPU (game and launcher); the system's where there is one |
+| [SDL 3](https://libsdl.org) | zlib. Copyright (C) 1997-2026 Sam Lantinga | Window, input, audio, GPU (game and launcher); the system's where there is one. In the Android app also its Java half (`android-project/`), compiled into the app unchanged |
 | [Dear ImGui](https://github.com/ocornut/imgui) 1.92.9b | MIT. Copyright (c) 2014-2026 Omar Cornut | The launcher's interface, compiled into the launcher |
 | [Inter](https://rsms.me/inter/) 4.1 | SIL Open Font License 1.1. Copyright (c) 2016 The Inter Project Authors | The launcher's font, compiled into the launcher |
 | [GekkoNet](https://github.com/HeatXD/GekkoNet) (release v20261024222910-9da2363) — this fork only | BSD-2-Clause. Copyright (c) 2024-2026, Jamie Meyer | Online play's rollback and its messages (port/online.h), compiled into the games (without its asio) |
 | [zpp_bits](https://github.com/eyalz800/zpp_bits), carried by GekkoNet — this fork only | MIT. Copyright (c) 2021 Eyal Z | GekkoNet's packing of its messages |
 | [zlib](https://zlib.net) | zlib. Copyright (C) 1995-2024 Jean-loup Gailly and Mark Adler | Reading a ROM set's archive, screenshots (PNG); the system's |
+| [librashader](https://github.com/SnowflakePowered/librashader) 0.12.1 | MPL-2.0 or GPL-3.0 (used here under GPL-3.0). Copyright (c) chyyran and its contributors. Its C header, `third_party/librashader.h`, is in this repository: MIT | The Display page's shaders (`port/shading.h`): `librashader.dylib` in the macOS app, `librashader.so` and `librashader.dll` beside the Linux and Windows games and in the Android app (with the NDK's LLVM libc++ linked in), built from source (`tools/librashader.sh`) with the Rust crates its `Cargo.lock` names |
+| [slang-shaders](https://github.com/libretro/slang-shaders) (commit `2b0530b`) | Each file its own, stated at its top: crt-geom-mini (after cgwg's crt-geom), CRT Royale (TroggleMonkey), CRT Guest (guest(r), Dr. Venom) and zfast-crt, CRT Light (Greg Hogan) GPL-2.0-or-later; CRT Lottes (Timothy Lottes), scanline-fract (hunterk) and sharp-bilinear-scanlines (rsn8887) public domain; xBRZ (Hyllian, Zenju) and ScaleFX (Sp00kyFox) and the blur and gamma includes MIT; the stock pass (libretro), ossc (DariusG) and integer-scaling-scanlines with no notice, and crt-geom-mini's linearize pass none either | The presets the Display page's Shader names, with the files they use, in the app's `Resources/shaders` and the Linux and Windows games' `shaders` (`tools/shaders.py`) |
 
 Each download is checked against its published SHA-256. The release archives (`tools/release/`) carry the
 license texts of SDL 3, Dear ImGui and Inter (the font is inside the launcher), MAME's notice above, and the
 GPL-3.0 with the offer of source that goes with it (`SOURCE.txt`: the tag's source on GitHub). In release builds
 SDL 3 (3.4.16) is linked into every program; `zlib1.dll` is in the Windows archive, and there the MinGW-w64
 runtime (libstdc++, libgcc, winpthreads) is linked in: GPL-3.0 with the GCC Runtime Library Exception, and the
-MinGW-w64 runtime licence, whose texts the Windows archive carries too.
+MinGW-w64 runtime licence, whose texts the Windows archive carries too. The Android app carries the same texts in its
+assets, and the NDK's LLVM libc++ is linked into its libraries (Apache-2.0 with LLVM exceptions).
 
 ## Tools used to build (not included in builds)
 
 Python, CMake, Ninja, a C++ compiler; glslangValidator and SPIRV-Cross to regenerate
-`port/shaders.inc` from the shaders in `port/shaders/` (which are this project's).
+`port/shaders.inc` from the shaders in `port/shaders/` (which are this project's). For the Android app, the Android
+SDK and NDK, and Gradle with the Android Gradle plugin: `android/gradlew` and `android/gradle/wrapper/` are Gradle's
+wrapper (Apache-2.0, Copyright the Gradle authors), which downloads Gradle itself.
 
 ## What is not included
 
@@ -181,3 +186,34 @@ characters of the version text it knows the program by.
 Code added later from another project must have a license compatible with the GPL-3.0 and be listed
 here, with its notice kept in the file. `tools/audit.sh` fails if a file marked as another
 project's is not one of those listed above.
+
+
+### ymfm (BSD-3-Clause)
+
+Yamaha FM synthesis by Aaron Giles, ymfm revision 81aec25. OPM sources are kept as published: `third_party/ymfm.h`, `third_party/ymfm_fm.h`, `third_party/ymfm_fm.ipp`, `third_party/ymfm_opm.h` and `third_party/ymfm_opm.cpp`.
+
+```
+Copyright (c) 2021, Aaron Giles
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification, are permitted
+provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this list of conditions
+   and the following disclaimer.
+2. Redistributions in binary form must reproduce the above copyright notice, this list of
+   conditions and the following disclaimer in the documentation and/or other materials provided
+   with the distribution.
+3. Neither the name of the copyright holder nor the names of its contributors may be used to
+   endorse or promote products derived from this software without specific prior written
+   permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR
+IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND
+FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR
+CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER
+IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT
+OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```

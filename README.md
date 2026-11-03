@@ -4,322 +4,172 @@
 [![Release](https://img.shields.io/github/v/release/tmcleroy/cps2recomp?include_prereleases)](https://github.com/tmcleroy/cps2recomp/releases)
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
 
-**Unofficial native PC ports of Capcom's CPS-2 arcade games (and CPS-1 ones), for macOS, Linux (Steam Deck
-included) and Windows, in one download with one launcher.** Each game's program is translated ahead of time into C++
-and runs on a machine written for this project, not an emulator. Each fighting game has a training mode, which no release of these games has ever had; the beat-'em-ups take three players at once, with
-free play, a stage to start at, a score attack and viewers for their stages and characters.
+**Unofficial native PC ports of Capcom's CPS-2 arcade games (and a CPS-1 one), for macOS, Linux (Steam Deck and
+ARM64 included), Windows and Android, in one download with one launcher.** Each game's program is translated ahead of time
+into C++ and runs on a machine written for this project, not an emulator. The fighting games add a full training
+mode, online play with rollback, widescreen and new modes.
 
-**[Get started: download it and play →](#playing)**
-
-> **Beta.** Every game's code is checked instruction by instruction, and the fighting games play from start to
-> ending (the beat-'em-ups, new, through their first stages in made-up play), but they have been played on few
-> machines and controllers yet. Expect rough edges, and please
-> [report what you find](#feedback-and-contributing).
+**[Get started →](#getting-started)**
 
 **No game files are included.** You need your own copy of each game: its arcade ROM set (a CPS-2 game's with its key
-file), from a board you own. **Only the version named below works for each game.** This project cannot help you get
-one.
+file). Only the versions named below work for each game, and this project cannot help you get one.
 
-This project is not affiliated with, endorsed by, or sponsored by Capcom or Marvel. *Street Fighter*, *Super Puzzle
-Fighter*, *Super Gem Fighter*, *Pocket Fighter*, *Vampire Savior*, *Vampire Hunter* and *Darkstalkers* are trademarks of Capcom Co., Ltd.; *X-Men*, *Marvel Super Heroes* and their
-characters are trademarks of Marvel Characters, Inc.; *Alien vs. Predator*
-and *Cadillacs and Dinosaurs* are trademarks of their owners; "CPS-1", "CPS-2" and "QSound" are names and trademarks of
-their owners, used here only to say what the programs work with.
+![The model viewer: Psylocke at 1.5x, going through her animations](docs/screenshots/msh/model-viewer-psylocke.gif)
 
-![The launcher: every game whose ROM set you have, ready to play](docs/screenshots/launcher-games.png)
+![The colour editor: Rogue's green suit turned purple and her yellows pink, colour by colour](docs/screenshots/xmvsf/colour-editor-rogue.gif)
+
+![Training mode in Street Fighter Alpha 2, in widescreen: hit boxes, input displays, the damage readout and the frame meter](docs/screenshots/sfa2/training.gif)
+
+![Custom colours: Morrigan in nine colourings made in the colour editor](docs/screenshots/vampire_savior/morrigan-colours-1.png)
 
 ## The games
 
-| Game | ROM set | What it adds |
+| Game | ROM set | Notes |
 | --- | --- | --- |
-| [**Ghouls'n Ghosts**](games/ghouls/README.md) (1988, CPS-1) | `ghouls` (World) | A first port on the classic CPS-1 board at 10 MHz: the picture, the two buttons, the game as the board plays it, and its FM music and effects (this fork: ymfm's YM2151) |
-| [**Street Fighter II: Champion Edition**](games/sf2ce/README.md) (1992, CPS-1) | `sf2ce` (World 920513) | A first port on the classic CPS-1 board: the picture, the six buttons, the game as the board plays it, and its sound (this fork: ymfm's YM2151) |
-| [**Street Fighter II: Hyper Fighting**](games/sf2hf/README.md) (1992, CPS-1) | `sf2hf` (World 921209) | Champion Edition's first port for the faster revision, with its sound (this fork) |
-| [**Super Street Fighter II Turbo**](games/ssf2t/README.md) (1994, *Super Street Fighter II X* in Japan) | `ssf2xjr1` (Japan 940223, the tournament revision) | A full training mode (hit boxes, frame data and a frame meter, input display, combo and stun readouts, a dummy that records, replays and guards), widescreen, survival, ring out, endless battle, a tag team battle (the CPU tagging as a person would), the stage and model viewers, Akuma and the old characters with no code, custom colours |
-| [**Hyper Street Fighter II**](games/hsf2/README.md) (2004, *The Anniversary Edition*) | `hsf2j` (Japan 040202) | Super Turbo's modes from its own sources (this fork): training mode and its dummy, hit boxes and frame data, survival, endless battle, ring out, attract mode, the stage viewer, free play, the Board and Cheats pages, its music with F12 |
-| [**Street Fighter Alpha**](games/sfa/README.md) (1995) | `sfa` (Europe 950727) | A full training mode (hit boxes, frame data and a frame meter, input display, combo and stun readouts, a dummy that records, replays and guards), widescreen, survival, ring out, endless battle, the stage and model viewers, the hidden characters with no code, custom colours |
-| [**Street Fighter Alpha 2**](games/sfa2/README.md) (1996) | `sfa2u` (USA 960430) | A full training mode (hit and throw boxes, frame data and a frame meter, combo, stun and Custom Combo readouts, input display, a dummy that records, replays, guards and answers), widescreen, survival, ring out, endless battle, a team battle, knock-out or Marvel-style tag (2 vs 2 for four players), the CPU tagging and playing a ring out for the ring, the stage and model viewers, the hidden characters, custom colours |
-| [**Street Fighter Alpha 3**](games/sfa3/README.md) (1998) | `sfa3u` (USA 980904, the tournament revision) | A full training mode (hit and throw boxes, frame data and a frame meter, combo, stun and custom combo readouts, fixed damage, input display, a dummy that guards high or low, Alpha counters, techs throws, rises quickly and mashes out of stun), widescreen, survival, ring out, endless battle, a team battle, knock-out or Marvel-style tag (2 vs 2 for four players), the stage and model viewers, Balrog, Juni and Juli with no code, custom colours |
-| [**Super Gem Fighter Mini Mix**](games/pocket_fighter/README.md) (1997, *Pocket Fighter*) | `sgemf` (USA 970904) | A full training mode (hit boxes, frame data and a frame meter, input display, combo and stun readouts, a dummy that records, replays and guards), widescreen, survival, ring out, endless battle, the stage and model viewers, the hidden characters with no code, custom colours |
-| [**Marvel Super Heroes**](games/msh/README.md) (1995) | `msh` (Europe 951024) | One-on-one with the Infinity Gems; a full training mode (hit boxes, frame data and a frame meter, input display, combo readout, a dummy that records, replays and guards, every gem at hand), widescreen, survival, ring out, endless battle, the stage and model viewers, Dr. Doom and Thanos with no code, custom colours |
-| [**X-Men vs. Street Fighter**](games/xmvsf/README.md) (1996) | `xmvsf` (Europe 961004) | The first tag-team game here, with tag-team co-op against the computer and 2 vs 2 for four players; a full training mode (hit boxes, frame data and a frame meter, input display, combo readout, a dummy that records, replays and guards), widescreen, survival, ring out, endless battle, the stage and model viewers, the hidden character with no code, custom colours |
-| [**Super Puzzle Fighter II Turbo**](games/puzzle_fighter/README.md) (1996) | `spf2t` (Europe 960529) | A training mode (attack readout, landing guide, input display, a dummy that sends counter gems to cancel, crash gems as you choose), CPU battle, the hidden characters at a kick, custom colours for the characters and the gems |
-| [**Vampire Savior: The Lord of Vampire**](games/vampire_savior/README.md) (1997) | `vsavj` (Japan 970519) | A full training mode (hit boxes, frame data and a frame meter, input display, a dummy that records, replays and guards), widescreen, survival, ring out, endless battle, a tag team battle, knock-out or Marvel-style (the left trigger tags; 2 vs 2 for four players), the CPU tagging and playing a ring out for the ring, the stage and model viewers, the hidden characters, custom colours |
-| [**Vampire Savior 2: The Lord of Vampire**](games/vsav2/README.md) (1997) | `vsav2` (Japan 970913) | Donovan, Phobos and Pyron back, and Donovan's stage; everything Vampire Savior's port has (its sources, checked against this game's code) |
-| [**Vampire Savior Definitive**](games/vsav_definitive/README.md) (beta) | `vsavj` and `vsav2` | Vampire Savior with Donovan, Phobos and Pyron taken from Vampire Savior 2, all eighteen by Vampire Savior's rules, the three with places of their own at the character choice; everything Vampire Savior's port has |
-| [**Vampire Hunter 2: Darkstalkers Revenge**](games/vhunt2/README.md) (1997) | `vhunt2` (Japan 970929) | Night Warriors' cast on Vampire Savior's engine, each fighter's own theme; everything Vampire Savior's port has, and Dark Gallon among the hidden characters |
-| [**Alien vs. Predator**](games/avsp/README.md) (1994) | `avspu` (USA 940520) | Three players at once (the board's own setting, on in Enhanced), free play, a round to start at, score attack, attract mode, the stage and model viewers, rapid fire, the board's settings, infinite health, lives and time |
-| [**Cadillacs and Dinosaurs**](games/dino/README.md) (1993, CPS-1) | `dino` (World 930201) | The first CPS-1 game here, on a CPS-1 board written for it; three players at once, free play, a stage to start at, score attack, attract mode, the stage and model viewers, rapid fire, the board's settings, infinite health, lives and time |
-
-| | | |
-| --- | --- | --- |
-| [![Street Fighter Alpha 2: training mode](docs/screenshots/sfa2/training.png)](games/sfa2/README.md) | [![Super Puzzle Fighter II Turbo: training mode](docs/screenshots/puzzle_fighter/training.png)](games/puzzle_fighter/README.md) | [![Vampire Savior: training mode](docs/screenshots/vampire_savior/training.png)](games/vampire_savior/README.md) |
-| [![Vampire Savior 2: Phobos, Pyron and Donovan](docs/screenshots/vsav2/returning.png)](games/vsav2/README.md) | [![Vampire Hunter 2: Gallon, Aulbath and Sasquatch](docs/screenshots/vhunt2/night-warriors.png)](games/vhunt2/README.md) | [![Vampire Savior 2: training mode on Donovan's stage](docs/screenshots/vsav2/training.png)](games/vsav2/README.md) |
-| [![Vampire Savior Definitive: Phobos against Morrigan](docs/screenshots/vsav_definitive/phobos.png)](games/vsav_definitive/README.md) | [![Vampire Savior Definitive: the character choice, the three's places under the grid](docs/screenshots/vsav_definitive/choosing.png)](games/vsav_definitive/README.md) | [![Vampire Savior Definitive: the versus screen](docs/screenshots/vsav_definitive/versus.png)](games/vsav_definitive/README.md) |
-| [![Alien vs. Predator: three players](docs/screenshots/avsp/three-players.png)](games/avsp/README.md) | [![Cadillacs and Dinosaurs: three players](docs/screenshots/dino/three-players.png)](games/dino/README.md) | [![Cadillacs and Dinosaurs: the mansion](docs/screenshots/dino/mansion.png)](games/dino/README.md) |
+| [**Super Street Fighter II Turbo**](games/ssf2t/README.md) (1994) | `ssf2xjr1` (Japan 940223) | The tournament revision; Akuma and the old characters without codes |
+| [**Hyper Street Fighter II**](games/hsf2/README.md) (2004) | `hsf2` (USA 040202) | Every character in each game of the series' version, against each other; Akuma without a code |
+| [**Street Fighter Alpha**](games/sfa/README.md) (1995) | `sfa` (Europe 950727) | |
+| [**Street Fighter Alpha 2**](games/sfa2/README.md) (1996) | `sfa2u` (USA 960430) | Team battle and Marvel-style tag (2 vs 2 for four players) |
+| [**Street Fighter Zero 2 Alpha**](games/sfz2al/README.md) (1996) | `sfz2al` (Asia 960826) | Alpha 2's later revision, with the EX characters |
+| [**Street Fighter Alpha 3**](games/sfa3/README.md) (1998) | `sfa3u` (USA 980904) | Team battle and tag; Balrog, Juni and Juli without codes |
+| [**Super Gem Fighter Mini Mix**](games/pocket_fighter/README.md) (1997) | `sgemf` (USA 970904) | |
+| [**X-Men: Children of the Atom**](games/xmcota/README.md) (1994) | `xmcota` (Euro 950331) | Juggernaut, Magneto and Akuma without codes |
+| [**Marvel Super Heroes**](games/msh/README.md) (1995) | `msh` (Europe 951024) | Dr. Doom and Thanos without codes |
+| [**X-Men vs. Street Fighter**](games/xmvsf/README.md) (1996) | `xmvsf` (Europe 961004) | Tag-team co-op, and 2 vs 2 for four players |
+| [**Marvel Super Heroes vs. Street Fighter**](games/mshvsf/README.md) (1997) | `mshvsf` (Europe 970625) | Tag-team co-op, and 2 vs 2 for four players |
+| [**Marvel vs. Capcom**](games/mvsc/README.md) (1998) | `mvsc` (Europe 980123) | Tag-team co-op, and 2 vs 2 for four players |
+| [**Super Puzzle Fighter II Turbo**](games/puzzle_fighter/README.md) (1996) | `spf2t` (Europe 960529) | A puzzle training mode and CPU battle |
+| [**Darkstalkers: The Night Warriors**](games/dstlk/README.md) (1994) | `dstlk` (Europe 940705) | Huitzil and Pyron at a switch |
+| [**Night Warriors: Darkstalkers' Revenge**](games/nwarr/README.md) (1995) | `nwarr` (Europe 950316) | Huitzil and Pyron at a switch |
+| [**Vampire Savior**](games/vampire_savior/README.md) (1997) | `vsavj` (Japan 970519) | Tag team battle |
+| [**Vampire Savior 2**](games/vsav2/README.md) (1997) | `vsav2` (Japan 970913) | Donovan, Phobos and Pyron back |
+| [**Vampire Hunter 2**](games/vhunt2/README.md) (1997) | `vhunt2` (Japan 970929) | Night Warriors' cast on Vampire Savior's engine |
+| [**Vampire Savior Definitive**](games/vsav_definitive/README.md) (beta) | `vsavj` and `vsav2` (and `dstlk`, `sfa2u` for their stages) | Vampire Savior with all eighteen characters, and the first Darkstalkers' and Alpha 2's stages |
+| [**Alien vs. Predator**](games/avsp/README.md) (1994) | `avspu` (USA 940520) | Beat-'em-up: three players, a stage to start at, score attack |
+| [**Street Fighter II: Champion Edition**](games/sf2ce/README.md) (1992, CPS-1) | `sf2ce` (World 920513) | Classic CPS-1 with YM2151 and OKI sound |
+| [**Street Fighter II: Hyper Fighting**](games/sf2hf/README.md) (1992, CPS-1) | `sf2hf` (World 921209) | Classic CPS-1 with YM2151 and OKI sound |
+| [**Ghouls'n Ghosts**](games/ghouls/README.md) (1988, CPS-1) | `ghouls` (World) | Platform game; classic CPS-1 with YM2151 and OKI sound |
+| [**Cadillacs and Dinosaurs**](games/dino/README.md) (1993, CPS-1) | `dino` (World 930201) | Beat-'em-up: three players, a stage to start at, score attack |
+| [**The Punisher**](games/punisher/README.md) (1993, CPS-1) | `punisheru` (USA 930422) | Beat-'em-up: two players, a stage to start at, score attack |
 
 Each game's page has all it does, with pictures.
 
-## Every game has
-
-- **Keyboard, gamepad or arcade stick**, with every key and button changeable, for each player, once for all
-  the games or for one game on its own (the launcher's Controllers page: Layout for). A fighting game's controls
-  also have all three punches at once and all three kicks, for a key or a button of their own.
-- **An in-game menu** (Esc or `F1`; on a gamepad, the left stick's click or Start and Select together): the
-  game's modes, save states, speed, pause and frame advance, cheats, and every feature.
-- **Pure or Enhanced.** Pure plays exactly as the board does. Enhanced (the default) adds free play and your
-  own colours. Every other feature is a switch of its own, off unless you choose it.
-- **Rapid fire**: a button held down pressed again and again, fifteen times a second, for the first button or for
-  all of them; the first press seen at once.
-- **Arcade timing** (CPS-2 games): the processor run as on the arcade board, its waits for memory and the video chip's use of its
-  bus counted, so the game slows down where and as much as the board does (big supers, busy screens). Off unless
-  chosen; checked frame by frame against a cycle-exact model of the board ([docs/TIMING.md](docs/TIMING.md)).
-- **Run-ahead**: what you press seen a frame or two sooner than on the board, with the game running exactly as
-  without it.
-- **The picture your way**: sharp, whole pixels or smooth; 4:3, square pixels or the whole screen; full screen
-  or a window of the size you choose; widescreen in the fighting games.
-- **The board's operator settings** (difficulty, damage, timer speed, game speed, rounds and the rest), each as
-  the board is set unless you choose, and the game's own test menu.
-- **Straight to the title**: at a start or a reset, everything before the title runs unseen.
-- **A custom soundtrack**: your own music files (an arranged soundtrack from a console version, say) in place of
-  the board's music, song by song, with the board's sound effects and voices. [How →](#a-custom-soundtrack)
-- **Your ROM sets are only ever read.** Settings, save states and each board's settings memory go in your own
-  user folder, or with the launcher, on a drive you carry, in [portable mode](#portable-mode).
-- **Updates in the launcher**: new games and fixes come to the copy you have. When a new version is out the
-  launcher says so at the top of its Games page, and **Update** downloads the new version, checks it, puts
-  what changed in place and starts the new launcher. [More →](#updates)
-
-![The Features page: what the games share, set for all of them at once](docs/screenshots/launcher-features.png)
-
-## Playing
-
-1. Download the build for your system from the [releases page](https://github.com/tmcleroy/cps2recomp/releases)
-   and unpack it. Each release's page has the steps for macOS, Windows, Linux and the Steam devices.
-2. Open the launcher (`CPS-2 Recomp.app`, `cps2recomp-launcher`). On its Games page, **Choose folder…** and pick
-   the folder you keep your ROM sets in: it finds each game's by the set's name (`ssf2xjr1.zip`, `sfa.zip`, `sfa2u.zip`, `sfa3u.zip`,
-   `sgemf.zip`, `msh.zip`, `xmvsf.zip`, `spf2t.zip`, `vsavj.zip`, `vsav2.zip`, `vhunt2.zip`, `avspu.zip`, `dino.zip`, or a folder of the set's files). Or drop a set, or the folder, on the window, or choose each
-   game's set on its own. They stay where they are.
-3. Press **Play** beside a game (the first of its two buttons, where a gamepad's ring lands). Several games can run at once, each in its own window.
-
-Each game you have a ROM set for gets a page of its own in the sidebar: its Display switches (full screen,
-widescreen), Play, and the features only it has. The **Features** page has what the games share (free play,
-cheats, run-ahead, the picture, training mode's displays and the dummy, and the rest), set for every game at
-once; a feature changed in a game's own menu is set for the others too when you leave the game. The
-**Controllers** page sets the keys and buttons for all of them; its Layout for chooses a game, and Its own layout
-gives that game keys and buttons apart from the others', under the game's own names for its buttons.
-
-**Multi game** (the page after Controllers) plays several games one after another, for as long as you like. Its
-**Endless battle** goes through every stage of a fighting game with the game playing both fighters, then on to the
-next game's stages, and round again after the last: choose the games (every fighting game, or only some), their order
-(the sidebar's, or shuffled), how the stages change (**Shuffle**, each fading into the next after the time you choose,
-or **Scroll**, going by in order at the speed you choose) and full screen or as each game is set, then **Start**. Touch
-the controls to take a fighter over. Quitting a game (its menu's Quit game, or closing its window) ends the run, as
-does **Stop after this game**.
-
-![The Multi game page: the endless battle through every stage of each game you choose](docs/screenshots/launcher-multi.png)
-
-The games are in your order: drag a game's row in the sidebar up or down to keep the ones you play most at the top
-(with a gamepad or the keyboard, **Move up** and **Move down** on its page, under Play). The Games page lists them
-the same way. On a small screen, or with large text, the launcher closes up to fit: a narrower sidebar whose list
-scrolls, and each row's buttons under its words.
-
-While playing, Esc or `F1` (on a gamepad, the left stick's click, or Start and Select together) opens the
-in-game menu. Only the menu's "Quit game" row (or closing the window) ends the game. `F12` switches between a
-[custom soundtrack](#a-custom-soundtrack) and the board's music.
-
-In a window the game also has a **menu bar** above the picture (Game, Video, Audio, Input, Features, Help) for the
-mouse: the same choices as the in-game menu, and the window's own (its size, full screen, screenshots). Right-click
-the picture for the same menus where you click; `F10`, or Alt pressed and let go on its own, opens Game. While one of
-its menus is open the game stands still (online it goes on, and what would change the match is dim). Full screen has
-no bar until the pointer reaches the top edge. The keys while playing:
-
-| Key | Does |
-| --- | --- |
-| Esc, `F1` | the in-game menu |
-| `F10`, Alt | the menu bar's Game menu |
-| `F5`, `F9` | quick save, quick load (the slot chosen; `F6` and `F7` the slot before and after) |
-| `F8` | a screenshot, beside the save states in `screenshots/` |
-| `F11`, Alt+Enter | full screen |
-| `F12` | the custom soundtrack or the board's music |
-| `F2` | the board's test switch (its operator menu) |
-| `P`, `O` | stop and start again, one frame on |
-| `-`, `=` | slower, faster |
-| Backspace | the game's restart command |
-
-A key you give to the game in the Controllers page does only that.
-
-macOS: the app is not notarized, so the first time, right-click it and choose Open.
-Linux: unpack the archive anywhere and run `cps2recomp-launcher`.
-Windows: run `cps2recomp-launcher.exe`. Opening a game's own program (`sfa2.exe`, say) starts the launcher too,
-at that game's page (or straight into the game once its ROM set has been chosen).
-
-### Updates
-
-When the launcher opens it asks GitHub for this project's releases (the Updates card, at the top of the Games
-page, has a switch to stop that, and **Check now**). When there is a newer version it shows at the top of the Games page: **What's new**
-opens its notes, and **Update** downloads the new version's download for your system (the same file as on the
-releases page), checks it and every file that changed against the release's list, and only then
-puts them all in place; if anything goes wrong nothing is changed. The launcher then starts again as the new
-version. Your settings, save states and ROM sets are not touched. Quit the games first: Update waits until none is
-running. A beta is offered only to a beta.
-
-The launcher needs to be able to write to its own folder: on macOS, move `CPS-2 Recomp.app` to Applications (or
-anywhere of your own) before opening it the first time, not run it from the downloaded zip's folder. A copy built
-from source is told of a new version but not changed.
-
-### Portable mode
-
-To keep everything with the launcher (on a USB stick or an external drive you take from one computer to another),
-put an empty file named `portable.txt` beside it:
-
-| System | Where `portable.txt` goes | Where your things then are |
+| | | |
 | --- | --- | --- |
-| Windows, Linux, Steam Deck | in the `CPS2Recomp` folder, beside `cps2recomp-launcher` | `CPS2Recomp/user/` |
-| macOS | in the folder `CPS-2 Recomp.app` is in (not inside the app) | `user/` in that folder |
+| [![Street Fighter Alpha 2: training mode](docs/screenshots/sfa2/training.png)](games/sfa2/README.md) | [![Vampire Savior: training mode](docs/screenshots/vampire_savior/training.png)](games/vampire_savior/README.md) | [![Cadillacs and Dinosaurs: three players](docs/screenshots/dino/three-players.png)](games/dino/README.md) |
 
-Settings, save states, each board's settings memory, custom colours, the score attack records, a soundtrack in
-the game's own folder and the logs then go in `user/`, a folder for the launcher and one for each game, laid out
-as in your user folder. The launcher's Games page shows where they are under **Your files** (**Show** opens the
-folder).
+## Training mode
 
-- **The first time**, if your user folder already has the games' things, the launcher asks whether to copy them
-  to `user/`. Copying never takes anything from your user folder and never writes over a file.
-- **To stop**, take `portable.txt` away: the launcher uses your user folder again, as it was when you started
-  portable mode. Nothing is moved either way; to carry things back, copy the folders in `user/` to your user
-  folder yourself (with the launcher closed).
-- **Updates** keep `portable.txt` and `user/`: they change only the release's own files.
-- **The folder has to be one you can write to.** If it is not (a read-only drive, or Windows' Program Files), the
-  launcher says so and stops rather than keep your things somewhere else.
-- ROM sets are still only read, wherever they are. A ROM folder chosen on a drive letter (Windows) or a mount
-  point (`/Volumes/...`, `/media/...`) is remembered as that path: on another computer, choose it again if the
-  drive is somewhere else. A Steam shortcut (**Add to Steam**) is for the computer it was added on.
+The established fighting-game ports have a full training mode, from the in-game menu. The new classic CPS-1 ports
+have Board/Cheats options but no training mode yet:
 
-### From a terminal
+- **Hit boxes** (and throw boxes in Alpha 2 and 3), **frame data** and a **frame meter**, an **input display**, and a
+  combo and damage readout (and stun, in the Street Fighter games and Pocket Fighter).
+- **A dummy** that stands, crouches or jumps, guards (high, low or after the first hit), techs, gets up quickly,
+  reverses, and **records and replays** what you show it (each game's page says what its dummy can do).
+- Health and meter refilled, a stage of your choice, and **start over** from the round's beginning with one button.
 
-```sh
-cps2recomp-launcher --play sfa2                 # straight into a game, as the launcher has it set
-cps2recomp-launcher --play sfa2 -- --features widescreen,no_damage
-                                                # with more arguments for the game, after the launcher's own
-cps2recomp-launcher --page vampire_savior       # the launcher, at a game's page
-sfa2 --rom ~/roms/sfa2u.zip --settings my.ini   # a game's own program (beside the launcher), by itself
-sfa2 --soundtrack ~/music/sfa2-arranged          # a custom soundtrack's folder (with the feature on)
-sfa2 --help                                     # what a game's program takes
-```
+**[More about training mode →](docs/TRAINING.md)**
 
-The games' ids are `ssf2t`, `sfa`, `sfa2`, `sfa3`, `pocket_fighter`, `msh`, `xmvsf`, `puzzle_fighter`, `vampire_savior`, `vsav2`, `vhunt2`, `vsav_definitive`, `avsp` and `dino`. `--features` may be given more than once, and
-a later one wins.
+## Online play
 
-### A custom soundtrack
+Two players on two machines, with **rollback** netcode. Any mix of macOS, Linux, the Steam Deck and Windows can play
+each other.
 
-Each game can play your own music files in place of the board's music: an arranged soundtrack, say. The sound
-effects and voices stay the board's.
+- **Host** a match from the launcher, or from the game you're playing (its menu's **Online** page: you play on until
+  someone joins), and give the other player its **code**: they type it on the launcher's **Online** page. If you've
+  set your name, the match is also listed in the **lobby**, where anyone can pick it from **Open matches**. Nothing
+  needs setting up on either router.
+- The **waiting room** lists the players whose Online page is open: **Invite** one to a match in any game, and they
+  **Accept** from their launcher.
+- Both players need the same version of CPS-2 Recomp (the launcher shows yours at the top); a match on another
+  version is greyed in the list. Your ROM sets may be different regions of the game: the match is the host's region
+  (best effort: the same set is surest).
+- Each player presses Start to come in, as at the arcade. The match uses the host's board settings (difficulty,
+  timer, rounds); cheats are off.
+- **On screen:** both players' **names**, the ping (and the input delay, if you like), and the **win streak** of a
+  player who keeps winning.
+- **Chat** with the other player during a match: press T (or a gamepad's right stick, or the touch screen's Chat) and
+  type, on a keyboard or your system's on-screen keyboard. It goes straight between the two games.
+- A dropped connection waits for the other player to come back with the same code.
 
-1. Switch on **Custom soundtrack** (the Features page, under Sound; it is on in Enhanced, off in Pure).
-2. On a game's page, under Sound, **Choose…** the folder your music files are in (`.ogg`, `.flac`, `.mp3` or
-   `.wav`). With none chosen, the game uses the `soundtrack` folder in its own settings folder
-   (`~/Library/Application Support/<Game>/` on macOS, `~/.local/share/<Game>/` on Linux and Steam Deck,
-   `%APPDATA%\<Game>\` on Windows, `user/<Game>/` beside the launcher in [portable mode](#portable-mode)), which
-   it makes.
+**[More about online play →](docs/ONLINE.md)**: the lobby, the waiting room, joining by address, and how rollback works.
 
-That is all it takes: **a folder of music plays as a playlist**, in place of all the game's music, one file after
-another in their names' order (`2 ...` before `10 ...`), and from the first again after the last. Choose **On,
-shuffled** for a random order.
+## Everything else
 
-While playing, `F12` switches between your music and the board's at once, in the middle of a song: on, the board's
-music stops and your file plays from where the game is in the song; off, the board plays the song again from its
-start. A note over the picture says which is playing for a moment ("Musica: Arreglada" or "Musica: Arcade"). `F12`
-switches the same setting as the menu, back to the choice it had (in order or shuffled). Without a press the game
-plays exactly as before; a press changes only what the sound side plays.
+- **Widescreen** in the fighting games: 16:9, with more of the stage on each side ([more](docs/PICTURE.md#widescreen)).
+- **Alternative modes** in the fighting games: survival, ring out, an endless battle the game plays itself, and in
+  most a tag team battle; plus a stage viewer and a model viewer ([more](docs/MODES.md)).
+- **The picture your way**: sharp or smooth scaling, 4:3 or square pixels, and RetroArch shaders (CRT, scanlines,
+  xBRZ and more, or your own preset). A camera zoom follows either fighter or keeps both in view
+  ([more](docs/PICTURE.md)).
+- **Controls**: keyboard, gamepad or arcade stick, every button changeable per player and per game.
+- **An in-game menu**: save states, speed and pause, frame advance, cheats and every option.
+- **Arcade timing**: the processor slows down where and as much as the real board does, checked frame by frame
+  against a cycle-exact model of it ([docs/TIMING.md](docs/TIMING.md)). Off unless you choose it.
+- **Run-ahead**, the board's operator settings, free play, rapid fire, and straight to the title at start-up.
+- **A custom soundtrack**: your own music files in place of the board's music ([how](docs/SOUNDTRACK.md)).
+- **Multi game**: play several games one after another, such as an endless battle through every stage of each
+  ([more](docs/MODES.md#multi-game)).
+- **Updates** in the launcher, and a **portable mode** that keeps everything on a drive you carry
+  ([the launcher](docs/LAUNCHER.md)).
 
-**To replace particular songs** instead, name each file after the piece of music it replaces: `ryu.flac`,
-`player_select.ogg`, `ken_ending.mp3`. The game writes `songs.txt` into the folder, with every piece of its music
-by name and number and what it is (Street Fighter Alpha 2 has 59: each character's theme, each ending, the staff
-rolls, the title and the screens between fights). Once one file is named for a song, the folder works this way: a
-song you have no file for plays as the board has it, and other files are left alone.
 
-For files with other names, loops and loudness, put `soundtrack.ini` in the folder:
+## Getting started
 
-```ini
-volume = 80                  ; every song, in percent
+1. Download the build for your system from the [releases page](https://github.com/tmcleroy/cps2recomp/releases) and
+   unpack it.
+2. Open the launcher (`CPS-2 Recomp.app`, `cps2recomp-launcher`). On its Games page, **Choose folder…** and pick the
+   folder you keep your ROM sets in: it finds each game's set by name (`sfa2u.zip` or a folder of the set's files).
+   Your ROM sets are only ever read.
+3. Press **Play** beside a game.
 
-[ryu]                        ; a song by its name (or its number: [01])
-file = 05 Ryu's Theme.flac
-loop = 0:12.5 - 2:47.25      ; the part that repeats: start - end (minutes:seconds, or seconds)
-volume = 90
-```
+While playing, Esc or `F1` opens the in-game menu (on a gamepad: the left stick's click, or Start and Select
+together).
 
-`start` has a song begin further into its file (minutes:seconds, or seconds), so one file can hold two songs: a
-stage's tune and its later version, say, one after the other on a disc:
+- **macOS:** the app isn't notarized: the first time, right-click it and choose Open. Move it to Applications first,
+  so that it can update itself.
+- **Windows:** run `cps2recomp-launcher.exe`.
+- **Linux:** run `cps2recomp-launcher`.
 
-```ini
-[ryu]
-file = 03 Track 3.mp3
-loop = 0 - 60.43             ; the tune, and never on into the later version
+### Android
 
-[ryu_later]
-file = 03 Track 3.mp3
-start = 60.43                ; from there, and from there again each time round
-```
+1. Download `CPS2Recomp-android.apk` from the releases page on your phone or tablet and open it to install it
+   (Android 9 or later, 64-bit ARM; allow installs from your browser or file manager when asked).
+2. Open CPS-2 Recomp and press **Add ROM sets…** on its Games page: choose your sets' zips, as many at once as you
+   like. They are copied into the app's folder.
+3. Press **Play** beside a game.
 
-A song's file repeats whole (or from its `start`) unless it says otherwise: by `loop` in `soundtrack.ini`, `loop = no` to play it once, or the
-loop tags many soundtrack packs have (`LOOPSTART`, with `LOOPEND` or `LOOPLENGTH`, in samples). The music the board
-plays once (a fanfare, the versus screen, a game over) is played once. The music keeps the game's time: pausing,
-the menu, slow motion, a save state and run-ahead leave it where the game is (a playlist plays on, and waits only
-while the game is held). The game plays exactly the same with
-or without it.
-
-No music is included, and this project can't help you get any: use files you made from discs you own.
-
-### Coming from a game's own download
-
-Earlier releases came one game at a time (Street Fighter Alpha 2 Recomp, Vampire Savior Recomp). This launcher
-keeps each game's settings, save states and board memory in the same folder as before, and takes the ROM set you
-chose in a game's own launcher, so everything carries on. A game's own release still works.
+The games show a stick and buttons on the screen; a gamepad connected over Bluetooth or USB works too, and takes their
+place. Back, or the screen's **Menu**, opens the in-game menu.
 
 ### Steam Deck
 
-1. Hold the power button and choose **Switch to Desktop**.
-2. Download `CPS2Recomp-linux-x86_64.tar.gz` from the [releases page](https://github.com/tmcleroy/cps2recomp/releases).
-   In the file manager (Dolphin), right-click it and choose **Extract → Extract archive here**, then move the
-   `CPS2Recomp` folder where it can stay (for example a new `Applications` folder in your home folder). If you
-   move it later, do step 5 again.
-3. Copy your ROM sets onto the Deck into one folder, for example from a USB stick or the SD card.
-4. In the `CPS2Recomp` folder, open `cps2recomp-launcher`; on its Games page, **Choose folder…** and pick that
-   folder.
-5. On each game's page, press **Add to Steam**. It adds the game to your library (straight into it), and the
-   first time also **CPS-2 Recomp** (the launcher: ROM sets, features and controls).
-6. Go back to Gaming Mode with the **Return to Gaming Mode** icon on the desktop. They are in your Library under
-   **Non-Steam**.
-
-In a game, click the left stick, or press View and Menu together (the two buttons either side of the screen's
-top), to open the in-game menu; its "Quit game" row ends the game.
+1. In Desktop Mode, download `CPS2Recomp-linux-x86_64.tar.gz` from the releases page, extract it, and move the
+   `CPS2Recomp` folder somewhere it can stay (a new `Applications` folder in your home folder, say).
+2. Copy your ROM sets into one folder on the Deck.
+3. Open `cps2recomp-launcher`, **Choose folder…** on the Games page, and pick that folder.
+4. On each game's page, press **Add to Steam**. The games then appear in Gaming Mode under **Non-Steam**.
 
 ## What you need
 
-- The ROM set of each game you want to play (a CPS-2 game's with its key file): `ssf2xjr1` (*Super Street Fighter II
-  X: Grand Master Challenge*, Japan 940223), `sfa` (*Street Fighter Alpha: Warriors' Dreams*, Europe 950727), `sfa2u` (*Street Fighter Alpha 2*, USA 960430), `sfa3u` (*Street Fighter Alpha 3*, USA 980904),
-  `sgemf` (*Super Gem Fighter: Mini Mix*, USA 970904), `msh` (*Marvel Super Heroes*, Europe 951024), `xmvsf` (*X-Men Vs. Street Fighter*, Europe 961004), `spf2t` (*Super Puzzle Fighter II Turbo*, Europe 960529), `vsavj` (*Vampire Savior: The Lord of Vampire*,
-  Japan 970519), `vsav2` (*Vampire Savior 2: The Lord of Vampire*, Japan 970913), `vhunt2` (*Vampire Hunter 2:
-  Darkstalkers Revenge*, Japan 970929), `avspu` (*Alien vs. Predator*, USA 940520), `dino` (*Cadillacs and Dinosaurs*,
-  World 930201). Vampire Savior Definitive needs both `vsavj` and `vsav2`. As a zip (with its parent set's zip beside it if your collection keeps the shared files there)
-  or a folder of the set's files. The launcher checks every file by checksum and tells you which is missing or
-  different. Sets of other regions and revisions are refused: each port is made from that one version's
-  program, and its features use addresses found in it.
-- One of: macOS 13 or later (Apple silicon or Intel); Linux x86_64 or SteamOS; Windows 10 or 11, 64-bit.
-- A gamepad or stick (six buttons for the fighting games) is recommended; for three players in the beat-'em-ups, three
-  gamepads (or keys chosen for each player).
+- The ROM set of each game you want, as named in the table above: a zip (with its parent set's zip beside it if your
+  collection keeps the shared files there) or a folder of its files. The launcher checks every file and says which
+  is missing or different. **Other regions** of the same release work too, played as the board plays in that region:
+  the Marvel games', Super Gem Fighter's (*Pocket Fighter* in Japan), Puzzle Fighter's, Alpha's, Alpha 3's, Super
+  Turbo's and Alien vs. Predator's; each game's page names them. Other revisions don't work: each port is made from
+  one version's program. Vampire Savior Definitive needs both `vsavj` and `vsav2`, and shows the first
+  Darkstalkers' and Alpha 2's stages with `dstlk` and `sfa2u` too.
+- macOS 13 or later (Apple silicon or Intel), Linux x86_64 or ARM64 (SteamOS included), Windows 10 or 11, 64-bit, or
+  Android 9 or later on 64-bit ARM, with Vulkan.
+- A gamepad or stick is recommended (six buttons for the fighting games).
 
 ## How it works
 
-Each game's 68000 program is translated ahead of time into C++ and compiled into that game's program, and the
-parts its features touch are rewritten by hand as readable C++, each checked call by call against the game's
-own code. What the program expects of the board (its video, the QSound chip, the sound CPU and its registers,
-the settings memory) is code written for this project, not an emulator. The [toolkit](docs/TOOLKIT.md) is shared
-by every game, so a fix or a feature there reaches all of them; each game's page says how its port works. Games
-Capcom made from another's program (Vampire Savior 2 and Vampire Hunter 2, from Vampire Savior's) build that game's
-sources, with a list of where each place they name is in the other game, so they have all of its features. Vampire
-Savior Definitive runs Vampire Savior 2's own code for the characters it takes from it, beside Vampire Savior's, with
-that game's pictures and sound ([how and why](games/vsav_definitive/DEFINITIVE.md)).
+Each game's 68000 program is translated ahead of time into C++ and compiled into that game's program, and the parts
+its features touch are rewritten by hand as readable C++, each checked call by call against the game's own code. The
+board (video, the QSound chip, the sound CPU, the settings memory) is code written for this project, not an emulator.
+The [toolkit](docs/TOOLKIT.md) is shared by every game, so a fix or a feature there reaches all of them.
 
 ## Building from source
 
@@ -327,41 +177,43 @@ With your own ROM sets in `rom/<id>/` (ignored by Git), CMake, Ninja, SDL 3 and 
 
 ```sh
 make GAME=sfa2              # twice the first time
-make GAME=sfa2 explore      # once, about ten minutes: finds the game's code by made-up play and translates it
-make collection             # every game whose ROM set is here, and the launcher for all of them
+make GAME=sfa2 explore      # once, about ten minutes: finds the game's code and translates it
+make collection             # every game whose ROM set is here, and the launcher
 ```
 
-[docs/BUILDING.md](docs/BUILDING.md) has every platform, the checks and the release builds, and
-[docs/TOOLKIT.md](docs/TOOLKIT.md) how the toolkit works and how a game is added. `make check` needs no game.
+[docs/BUILDING.md](docs/BUILDING.md) has every platform and the checks; [docs/TOOLKIT.md](docs/TOOLKIT.md) has how the
+toolkit works and how a game is added.
 
 ## Feedback and contributing
 
-Bug reports and pull requests are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md) for the rules (above all:
-nothing from any game, ever, and never a key) and each game's roadmap for what is next. Security reports go by
-[SECURITY.md](SECURITY.md).
+Bug reports and pull requests are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md) for the rules (above all: nothing
+from any game, ever, and never a key). Security reports go by [SECURITY.md](SECURITY.md).
 
 ## Related projects
 
 | Project | What |
 | --- | --- |
 | [satrecomp](https://github.com/tmcleroy/satrecomp) | The same kind of toolkit for Sega Saturn games |
-| [recomp-common](https://github.com/tmcleroy/recomp-common) | The in-game menu, settings rules and launcher this project and satrecomp share |
-| [Muscle March Recomp](https://github.com/tmcleroy/muscle-march-recomp) | A native port of *Muscle March* (WiiWare), by the same author |
-| [doaxvb-re](https://github.com/NoRain211/doaxvb-re) | A native Windows port of *Dead or Alive Xtreme Beach Volleyball* (Xbox), by NoRain211; not made with these toolkits |
+| [recomp-common](https://github.com/tmcleroy/recomp-common) | The in-game menu, settings and launcher this project and satrecomp share |
 
 ## License and credits
 
 [GPL-3.0-only](LICENSE). [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) has the notices in full.
 
-- The program cipher (`machine/cps2crypt.*`) is MAME's (BSD-3-Clause; its header says so), worked out by
-  Andreas Naive and Nicola Salmoria. The QSound model follows MAME's high-level one (superctr, Valley Bell), and
-  the hardware facts follow MAME's CPS-2 and CPS-1 drivers. The Kabuki cipher of the CPS-1's sound CPU
-  (`machine/kabuki.*`) is written from the facts MAME's `kabuki.cpp` publishes (Nicola Salmoria); its keys are not
-  here: the port works each out from the player's own ROM.
-- The launcher's look, and the files that make it, come from the launcher of
-  [wiiparty-recomp](https://github.com/arelkair/wiiparty-recomp) by arelkair (GPL-3.0-or-later). They are in
-  `recomp-common/launcher/`, with the notices in recomp-common's `THIRD_PARTY_NOTICES.md`.
-- The programs use SDL 3 (zlib license), Dear ImGui (MIT) and the Inter font (SIL OFL 1.1, compiled into the
-  launcher); the release archives carry their licenses.
+- The program cipher (`machine/cps2crypt.*`) is MAME's (BSD-3-Clause), worked out by Andreas Naive and Nicola
+  Salmoria. The QSound model follows MAME's (superctr, Valley Bell), and the hardware facts follow MAME's CPS-2 and
+  CPS-1 drivers. The CPS-1 sound CPU's Kabuki cipher (`machine/kabuki.*`) is written from the facts MAME's
+  `kabuki.cpp` publishes (Nicola Salmoria); its keys are not here: the port works each out from the player's own ROM.
+- The launcher's look comes from the launcher of [wiiparty-recomp](https://github.com/arelkair/wiiparty-recomp) by
+  arelkair (GPL-3.0-or-later), in `recomp-common/launcher/`.
+- The programs use SDL 3 (zlib), Dear ImGui (MIT) and the Inter font (SIL OFL 1.1); the release archives carry their
+  licenses.
 
 The repository holds no game data and nothing derived from it.
+
+This project is not affiliated with, endorsed by, or sponsored by Capcom or Marvel. *Street Fighter*, *Super Puzzle
+Fighter*, *Super Gem Fighter*, *Pocket Fighter*, *Vampire Savior*, *Vampire Hunter*, *Night Warriors*, *Darkstalkers*, *Mega Man*,
+*Ghouls'n Ghosts*, *Strider* and *Captain Commando* are trademarks of Capcom Co., Ltd.; *X-Men*, *Marvel Super Heroes*,
+*The Punisher* and their characters are trademarks of Marvel Characters, Inc.; *Alien vs. Predator* and *Cadillacs and Dinosaurs* are
+trademarks of their owners; "CPS-1", "CPS-2" and "QSound" are names and trademarks of their owners, used here only to
+say what the programs work with.

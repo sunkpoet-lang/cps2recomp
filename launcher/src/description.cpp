@@ -11,6 +11,7 @@
 
 #include "../../machine/romset.h"
 #include "../../port/bindings.h"
+#include "../../port/netplay.h"
 
 #include <algorithm>
 #include <cctype>
@@ -40,12 +41,41 @@ struct GameInfo {
     const char* extra_set;
     // The Multi game page's modes it takes part in (game.cfg's multi: "endless")
     const char* multi;
+    // Other sets of the game it plays as well (game.cfg's other_set: other regions of the same program;
+    // machine/romset.h)
+    const char* other_set;
+    // The series the launcher puts it under, with the other games of it (game.cfg's series; "": none)
+    const char* series;
+    // Other games whose boards it can run beside its own (game.cfg's guests: their ids; runtime/guest.h; empty: none). In
+    // a collection, the set chosen for each is given to it (--guest ID=PATH); else the game looks for it beside its own.
+    // None is needed to play.
+    const char* guests;
     // (this fork) A Neo Geo game's (board "neogeo"): its fix layer's files, and the system's set and files (game.cfg's
     // fix, bios and bios_set; machine/romset.h, NeoGeoList)
     const char *fix, *bios, *bios_set;
 };
 #ifdef LAUNCHER_COLLECTION
 const GameInfo* game_of_set(const char* set);
+const GameInfo* game_of_id(const std::string& id);
+// The ids in a list of them (game.cfg's guests)
+std::vector<std::string> ids_in(const char* list) {
+    std::vector<std::string> ids;
+    std::string id;
+    for (const char* p = list ? list : ""; ; p++) {
+        if (*p == ' ' || *p == '\0') {
+            if (!id.empty()) {
+                ids.push_back(id);
+            }
+            id.clear();
+            if (!*p) {
+                break;
+            }
+        } else {
+            id += *p;
+        }
+    }
+    return ids;
+}
 #endif
 
 #ifdef LAUNCHER_COLLECTION
@@ -60,6 +90,17 @@ const char* keep(std::string text) {
     return kept.back().c_str();
 }
 
+// The sets the game plays, by name: its own ("mvsc (Marvel Vs. Capcom ... (Europe 980123))"), then its others' ("or
+// another region's: mvscu, mvscj or mvsca")
+std::string sets_named(const GameInfo& game) {
+    std::string text = std::string(game.rom_set) + " (" + game.rom_name + ")";
+    const cps2recomp::RomList list = cps2recomp::ParseRomList("", "", "", "", "", "", "", "", "", game.other_set);
+    for (size_t n = 0; n < list.others.size(); n++) {
+        text += (n == 0 ? " or another region's: " : n + 1 == list.others.size() ? " or " : ", ") + list.others[n].set;
+    }
+    return text;
+}
+
 // A ROM set: the set's zip (with its parent set's zip beside it, if the collection keeps shared files
 // there) or a folder with the set's files. Every file is checked against the checksums the port was made
 // from, and the program is deciphered with the set's key, as the game itself does when it starts. The
@@ -67,7 +108,9 @@ const char* keep(std::string text) {
 launcher::FileCheck check_rom_set(const GameInfo& game, const std::string& path) {
     launcher::FileCheck check;
     std::error_code error;
-    if (path.empty() || !std::filesystem::exists(path, error)) {
+    // (the path is UTF-8, as every one the launcher keeps: by its wide name on Windows, where a folder with an accent
+    // in it is not in the system's code page, #223)
+    if (path.empty() || !std::filesystem::exists(std::filesystem::u8path(path), error)) {
         check.message = "It isn't there any more.";
         return check;
     }
@@ -90,15 +133,15 @@ launcher::FileCheck check_rom_set(const GameInfo& game, const std::string& path)
     // (the same reading the game does: its files by checksum, from the zip, its parent's or the folder)
     const cps2recomp::RomList list =
         cps2recomp::ParseRomList(game.program, game.graphics, game.sound_program, game.samples, game.key, game.rom_set, game.rom_parent,
-                                 game.board, game.cps_b);
+                                 game.board, game.cps_b, game.other_set);
     cps2recomp::RomSet set;
     std::string message;
     if (cps2recomp::LoadRomSet(path, list, set, message)) {
         check.result = launcher::FileCheck::Result::Good;
-        check.message = game.rom_name;
+        check.message = set.name.empty() ? game.rom_name : set.name;
     } else {
-        check.message = "Not usable: " + message + ". This port needs the set " + game.rom_set + " (" + game.rom_name + ")" +
-                        (*game.key ? ", with its key file" : "") + ". Other versions and regions of the game will not work.";
+        check.message = "Not usable: " + message + ". This port needs the set " + sets_named(game) + (*game.key ? ", with its key file" : "") +
+                        ". Other versions of the game will not work.";
     }
     return check;
 }
@@ -110,8 +153,8 @@ std::string rom_set_nearby(const GameInfo& game, const std::filesystem::path& pr
     std::error_code error;
     for (int up = 0; up < 8 && !folder.empty(); up++, folder = folder.parent_path()) {
         for (const std::filesystem::path& rom : {folder / "rom" / game.id, folder / "rom"}) {
-            if (std::filesystem::is_directory(rom, error) && check_rom_set(game, rom.string()).usable()) {
-                return rom.string();
+            if (std::filesystem::is_directory(rom, error) && check_rom_set(game, rom.u8string()).usable()) {
+                return rom.u8string();
             }
         }
         if (folder == folder.parent_path()) {
@@ -125,7 +168,11 @@ std::string rom_set_nearby(const GameInfo& game, const std::filesystem::path& pr
 // then the parent set's, which a merged collection names it by)
 std::vector<std::filesystem::path> rom_set_candidates(const GameInfo& game, const std::filesystem::path& folder) {
     std::vector<std::filesystem::path> list;
-    for (const std::string& name : {std::string(game.rom_set), std::string(game.rom_parent)}) {
+    std::vector<std::string> names = {game.rom_set, game.rom_parent};
+    for (const cps2recomp::RomList::Other& other : cps2recomp::ParseRomList("", "", "", "", "", "", "", "", "", game.other_set).others) {
+        names.push_back(other.set);
+    }
+    for (const std::string& name : names) {
         if (!name.empty()) {
             list.push_back(folder / (name + ".zip"));
             list.push_back(folder / name);
@@ -159,7 +206,7 @@ std::vector<FeatureSwitch> feature_switches(const std::string& all) {
 // What a launcher is told about one game
 launcher::Description describe_game(const GameInfo& game) {
     launcher::Description d;
-    const std::string set = std::string(game.rom_set) + " (" + game.rom_name + ")";
+    const std::string set = sets_named(game);
     d.original = "in the arcade";
     d.file_heading = "ROM SET";
     // (a game that names its own buttons is not a fighting game, and has no training mode; the collection's controls,
@@ -170,17 +217,43 @@ launcher::Description describe_game(const GameInfo& game) {
 #else
     const bool forAll = fighting;
 #endif
+#ifdef __ANDROID__
+    // (Android: the set is copied into the app's folder; the screen's controls have a Menu button, and Back opens it)
     d.file_intro = keep("Choose your own copy of the game: the arcade ROM set " + set + (*game.key ? ", with its key file" : "") +
-                        ". Only this version works. It stays where it is: the launcher only reads it.\n\nWhile playing, Esc or F1 on "
+                        (*game.other_set ? ". Only these versions work" : ". Only this version works") +
+                        ". It is copied into the app's folder.\n\nWhile playing, Back or the screen's Menu button, or the left "
+                        "stick's click (or Start and Select together) on a gamepad, opens the in-game menu: " +
+#else
+    d.file_intro = keep("Choose your own copy of the game: the arcade ROM set " + set + (*game.key ? ", with its key file" : "") +
+                        (*game.other_set ? ". Only these versions work" : ". Only this version works") +
+                        ". It stays where it is: the launcher only reads it.\n\nWhile playing, Esc or F1 on "
                         "the keyboard, or the left stick's click (or Start and Select together) on a gamepad, opens the in-game menu: " +
+#endif
                         (fighting ? "training mode and the other modes" : "the game's options") + ", save states, speed, and every feature.");
 #ifdef LAUNCHER_COLLECTION
     if (const GameInfo* other = game.extra_set && *game.extra_set ? game_of_set(game.extra_set) : nullptr) {
         d.file_intro = keep(std::string(d.file_intro) + "\n\nIt takes things from " + other->name + " too: choose that game's ROM set (" +
                             other->rom_set + ") on its own page as well.");
     }
+    {
+        std::string others;
+        const std::vector<std::string> ids = ids_in(game.guests);
+        for (size_t n = 0; n < ids.size(); n++) {
+            if (const GameInfo* other = game_of_id(ids[n])) {
+                others += std::string(others.empty() ? "" : n + 1 == ids.size() ? " or " : ", ") + other->name + "'s (" + other->rom_set + ")";
+            }
+        }
+        if (!others.empty()) {
+            d.file_intro = keep(std::string(d.file_intro) + "\n\nWith " + others +
+                                " ROM set chosen on its own page too, it can show that game's stages.");
+        }
+    }
 #endif
+#ifdef __ANDROID__
+    d.file_empty = keep("None chosen. Choose " + std::string(game.rom_set) + ".zip.");
+#else
     d.file_empty = keep("None chosen. Drop " + std::string(game.rom_set) + ".zip or its folder here, or choose the zip.");
+#endif
     d.file_not_set_up = "The game isn't set up yet. Open the launcher (without --play) once to choose your ROM set.";
     d.file_filter = {"ROM set (zip)", "zip"};
     d.file_key = "rom";
@@ -190,15 +263,23 @@ launcher::Description describe_game(const GameInfo& game) {
     const std::vector<FeatureSwitch> switches = feature_switches(game.display);
     // What the game is started with: the player's ROM set (read only) and their saves folder
     const std::string extra = game.extra_set ? game.extra_set : "";
-    d.arguments = [switches, extra](const launcher::Launch& launch) {
-        std::vector<std::string> args = {"--rom", launch.file, "--eeprom", (launch.folder / "saves" / "eeprom.bin").string(),
-                                         "--settings", (launch.folder / "settings.ini").string()};
+    const std::string guests = game.guests ? game.guests : "";
+    d.arguments = [switches, extra, guests](const launcher::Launch& launch) {
+        std::vector<std::string> args = {"--rom", launch.file, "--eeprom", (launch.folder / "saves" / "eeprom.bin").u8string(),
+                                         "--settings", (launch.folder / "settings.ini").u8string()};
 #ifdef LAUNCHER_COLLECTION
         if (const GameInfo* other = extra.empty() || !launch.file_of ? nullptr : game_of_set(extra.c_str())) {
             const std::string file = launch.file_of(other->id);
             if (!file.empty()) {
                 args.push_back("--rom2");
                 args.push_back(file);
+            }
+        }
+        for (const std::string& id : ids_in(guests.c_str())) {
+            const std::string file = launch.file_of && game_of_id(id) ? launch.file_of(id.c_str()) : "";
+            if (!file.empty()) {
+                args.push_back("--guest");
+                args.push_back(id + "=" + file);
             }
         }
 #endif
@@ -223,6 +304,18 @@ launcher::Description describe_game(const GameInfo& game) {
                   "plays as a playlist, or files named as the songs.txt the game writes there replace those songs. None chosen: the "
                   "soundtrack folder in the game's own folder.",
                   "--soundtrack"}};
+    // (online play: port/netplay.h)
+    d.online = {"--host", "--join", 7845, true,
+                "Two players, each on their own machine with the game, anywhere: one hosts and gives the other the code their game "
+                "shows; the other joins with it. Each presses Start to come in. The match has the host's board settings and the "
+                "features that change play."};
+    // (the lobby: online/, the matches hosts have listed; Netplay::kService, kProtocol)
+    d.online.lobby = keep(std::string(port::Netplay::kService) + "/v1/lobby/" + game.id + "?protocol=" + std::to_string(port::Netplay::kProtocol));
+    d.online.list_argument = "--net-list";
+    d.online.name_argument = "--net-name";
+    d.online.arcade_argument = "--net-arcade"; // (the host plays alone until the other player comes: port/main.cpp, ArcadeFrame)
+    d.online.invite_argument = "--net-invite"; // (a player in the waiting room invited: online/, Collection::room)
+    d.online.invite_name_argument = "--net-invite-name";
     d.display = {{"fullscreen", "Full screen", "F11 switches while playing.", false, nullptr}};  // (a window unless asked)
     for (const FeatureSwitch& one : switches) {
         d.display.push_back({keep(one.name), keep(one.title), keep(one.detail), false, nullptr});
@@ -278,6 +371,15 @@ const port::BoundTable& shared_table() {
         return port::MakeBoundTable(players, buttons, true);
     }();
     return table;
+}
+// The collection's game of this id
+const GameInfo* game_of_id(const std::string& id) {
+    for (const GameInfo& game : kGames) {
+        if (id == game.id) {
+            return &game;
+        }
+    }
+    return nullptr;
 }
 // The collection's game whose ROM set this is
 const GameInfo* game_of_set(const char* set) {
@@ -422,14 +524,25 @@ const launcher::Collection& launcher::describe_collection() {
     static const Collection about = [] {
         Collection c;
         c.subtitle = "Capcom CPS-1 and CPS-2 arcade games, native";
+#ifdef __ANDROID__
+        // (Android: the sets are chosen with the system's picker and copied into the app's folder: recomp-common's
+        // launcher, App::choose_folder)
+        c.intro = "Each game needs your own copy of it: its arcade ROM set (a CPS-2 game's with its key file). Add the sets from your phone or a "
+                  "drive: they are copied into the app's folder.\n\n"
+                  "While playing, Back or the screen's Menu button, or the left stick's click (or Start and Select together) on a gamepad, "
+                  "opens the in-game menu.";
+        c.find_title = "Add your sets";
+        c.find_detail = "Choose the ROM sets, as many as you like at once, by the set's name (sfa2u.zip, say). Each goes to its game.";
+#else
         c.intro = "Each game needs your own copy of it: its arcade ROM set (a CPS-2 game's with its key file). Show the launcher the folder you keep them in, "
                   "or drop a set (or the folder) on this window. The sets stay where they are: the launcher only reads them.\n\n"
                   "While playing, Esc or F1 on the keyboard, or the left stick's click (or Start and Select together) on a gamepad, "
                   "opens the in-game menu.";
         c.find_title = "Look in a folder";
         c.find_detail = "Finds each game's ROM set in a folder of them, by the set's name (sfa2u.zip, say).";
+#endif
         for (const GameInfo& game : kGames) {
-            c.games.push_back({game.id, game.name, game.id, "", describe_game(game)});
+            c.games.push_back({game.id, game.name, game.id, "", describe_game(game), *game.series ? game.series : nullptr});
         }
         for (const OutsideGame& game : outside_games()) {
             c.games.push_back({game.id, game.name, game.id, "", describe_outside(game)});
@@ -438,6 +551,20 @@ const launcher::Collection& launcher::describe_collection() {
         // The Multi game page: the fighting games' endless battle (fight/battle.h), each game's every stage once and
         // then the next game's (--multi endless:shuffle:SECONDS or endless:scroll:SPEED)
         c.multi_intro = "Several games played one after another, as long as you like. Choose the games and how they are played, then Start.";
+        // (online play's lobby, every game's: online/, Netplay::kService, kProtocol)
+        static const std::string lobby = std::string(port::Netplay::kService) + "/v1/lobby?protocol=" + std::to_string(port::Netplay::kProtocol);
+        c.lobby = lobby.c_str();
+        static const std::string lookup = std::string(port::Netplay::kService) + "/v1/code/";
+        c.code_lookup = lookup.c_str();
+        // (the waiting room: online/, the players whose Online page is open, to invite to a match)
+        static const std::string room = std::string(port::Netplay::kService) + "/v1/room";
+        c.room = room.c_str();
+        c.room_protocol = port::Netplay::kProtocol;
+        c.file_name = "ROM set";
+        c.online_features = "Online"; // (the ping and the input delay on the screen: port/main.cpp)
+        c.online_intro = "Play someone on another machine: join a match a player is hosting, or host one in any of your games for others to "
+                         "join, or invite someone from the waiting room. A game's own page has its Online card too, for a match with a code only the people "
+                         "you give it to know.";
         launcher::MultiMode endless;
         endless.key = "endless";
         endless.title = "Endless battle";
@@ -454,15 +581,78 @@ const launcher::Collection& launcher::describe_collection() {
             {"time", "Each stage for", "Shuffle: how long they fight on a stage before it fades into the next.",
              {"30 seconds", "1 minute", "2 minutes", "3 minutes", "5 minutes"}, 1, "stages", 0},
             {"speed", "Scroll speed", "Scroll: how fast the stages go by.", {"Slow", "Medium", "Fast"}, 1, "stages", 1},
-            {"screen", "Screen", "Full screen for every game, or each game in a window or full screen as its own Display switch has it.",
-             {"Full screen", "As each game is set"}},
+            {"screen", "Screen", "Every game full screen, or every game in a window, or each as its own Full screen switch has it. For this run only.",
+             {"Full screen", "Window", "As each game is set"}},
+            {"picture", "Picture", "Every game in widescreen, or every game 4:3, or each as its own Widescreen switch has it. For this run only.",
+             {"Widescreen", "4:3", "As each game is set"}},
+            // (the Display page's own, port/main.cpp: every game has them, and every endless battle invisible walls)
+            {"walls", "Invisible walls", "With widescreen: every game played exactly as on the board, behind walls that are not seen, or every game "
+             "to the wide picture's edges, or each as its own Display page has it. For this run only.",
+             {"On", "Off", "As each game is set"}, 2},
+            {"scaling", "Scaling", "Sharp: each pixel a crisp block. Whole pixels: every pixel the same whole number of the screen's pixels tall. "
+             "Smooth: softened all over. Or each as its own Display page has it. For this run only.",
+             {"Sharp", "Whole pixels", "Smooth", "As each game is set"}, 3},
+            {"shape", "Picture shape", "4:3 as the arcade's monitor, square pixels, or filling the window or screen, or each as its own Display "
+             "page has it. For this run only.",
+             {"4:3", "Square pixels", "Fill", "As each game is set"}, 3},
+            {"size", "Window size", "How large the first game's window opens, in times the board's 224 lines, or as its own Display page has it. "
+             "Each game after it opens where the one before was, as large.",
+             {"2x", "3x", "4x", "5x", "6x", "As each game is set"}, 5},
+            // (the Display page's Shader, port/main.cpp display_shader: the same choices, in the same order)
+            {"shader", "Shader", "Every game through the same shader, or each as its own Display page has it. For this run only.",
+             {"Off", "CRT", "CRT Lottes", "CRT Royale", "CRT Guest", "CRT Light", "Scanlines: light", "Scanlines: strong", "Scanlines: OSSC",
+              "Scanlines: dark", "xBRZ", "ScaleFX", "Your own", "As each game is set"},
+             13},
+            // (port/zoom.h: --zoom 1:3, the camera on both fighters from the start)
+            {"zoom", "Zoom", "Both fighters: in every game the camera follows the two fighters, as close as they allow (the zoom's L3 and R3 "
+             "together). Off: as each game starts, all of the picture.",
+             {"Off", "Both fighters"}},
+        };
+        // (port/frontend_sdl.cpp: in a Multi game run; each unless the player has given it to the game)
+        endless.buttons = {
+            {"Next game", "Fades out of this game and on to the next.", {"N", "Left shoulder"}},
+            {"Fast forward", "Held: the game runs four times as fast, without sound.", {"F", "Left trigger"}},
         };
         endless.arguments = [](const std::vector<int>& values) {
             static const int kSeconds[] = {30, 60, 120, 180, 300};
             std::vector<std::string> args = {"--multi", values[0] == 1 ? "endless:scroll:" + std::to_string(values[2])
                                                                        : "endless:shuffle:" + std::to_string(kSeconds[std::clamp(values[1], 0, 4)])};
+            // (after the game's own arguments, so these win; nothing is kept in its settings)
             if (values[3] == 0) {
                 args.push_back("--fullscreen");
+            } else if (values[3] == 1) {
+                args.push_back("--window");
+            }
+            if (values[4] != 2) {
+                args.push_back("--features");
+                args.push_back(values[4] == 0 ? "widescreen" : "-widescreen");
+            }
+            // (the features' own values: display_scaling and display_shape as listed, window_size 3x first)
+            static const int kSizes[] = {1, 0, 2, 3, 4};
+            std::string display;
+            auto give = [&](const std::string& one) { display += (display.empty() ? "" : ",") + one; };
+            if (values[5] != 2) {
+                give(values[5] == 0 ? "widescreen_walls" : "-widescreen_walls");
+            }
+            if (values[6] != 3) {
+                give("display_scaling=" + std::to_string(values[6]));
+            }
+            if (values[7] != 3) {
+                give("display_shape=" + std::to_string(values[7]));
+            }
+            if (values[8] != 5) {
+                give("window_size=" + std::to_string(kSizes[std::clamp(values[8], 0, 4)]));
+            }
+            if (values[9] != 13) {
+                give("display_shader=" + std::to_string(values[9]));
+            }
+            if (!display.empty()) {
+                args.push_back("--features");
+                args.push_back(display);
+            }
+            if (values[10] == 1) {
+                args.push_back("--zoom");
+                args.push_back("1:3");
             }
             return args;
         };
@@ -491,12 +681,15 @@ const launcher::Collection& launcher::describe_collection() {
 #ifndef LAUNCHER_CPS_B
 #define LAUNCHER_CPS_B ""
 #endif
+#ifndef LAUNCHER_OTHER_SET
+#define LAUNCHER_OTHER_SET ""
+#endif
 
 const launcher::Description& launcher::describe() {
     static const Description about = describe_game({LAUNCHER_GAME_EXE, LAUNCHER_GAME_NAME, LAUNCHER_ROM_SET, LAUNCHER_ROM_PARENT, LAUNCHER_ROM_NAME,
                                                     LAUNCHER_ROM_PROGRAM, LAUNCHER_ROM_GRAPHICS, LAUNCHER_ROM_SOUND_PROGRAM, LAUNCHER_ROM_SAMPLES,
                                                     LAUNCHER_ROM_KEY, LAUNCHER_DISPLAY_SWITCHES, LAUNCHER_PLAYERS, LAUNCHER_BUTTONS,
-                                                    LAUNCHER_BOARD, LAUNCHER_CPS_B, "", ""});
+                                                    LAUNCHER_BOARD, LAUNCHER_CPS_B, "", "", LAUNCHER_OTHER_SET, ""});
     return about;
 }
 

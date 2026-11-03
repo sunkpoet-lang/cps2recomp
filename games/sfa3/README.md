@@ -23,7 +23,7 @@ title, the board's operator settings, cheats, save states, run-ahead, arcade tim
 > [report what you find](#feedback-and-contributing).
 
 **No game files are included.** You need your own copy of the game: the arcade ROM set `sfa3u` (USA, 980904) with its
-key file, from a board you own. **Only that version works.** This project cannot help you get one.
+key file, from a board you own. **Only the sets named below work.** This project cannot help you get one.
 
 This project is not affiliated with, endorsed by, or sponsored by Capcom. *Street Fighter* is a trademark of Capcom
 Co., Ltd.
@@ -45,7 +45,20 @@ checked against an interpreter of the same program ([how it was made](PROGRESS.m
   launcher. Two more can be given a key or a button: all three punches at once, and all three kicks. In the collection
   it can have a layout of its own, apart from the other games'.
 - An in-game menu (Esc or `F1`; on a gamepad, the left stick's click or Start and Select together) with the
-  training mode and the other modes, save states, speed, the cheats and every feature.
+  training mode and the other modes, save states, speed (1/8 to 8x), the cheats,
+  every feature, and a Reset all options row.
+- **Zoom**: hold the left stick's click and press the left shoulder to zoom in on player 1's fighter, the right
+  shoulder for player 2's (keyboard: hold Left Shift and press Q or E). Each press for the same player goes a size
+  up, 1.25x, 1.5x, 1.75x and 2x (the model viewer's sizes: at 2x the top of a tall fighter is off the screen), then
+  back to the whole picture; a press for the other player looks at that one instead. The fighter is kept in the
+  middle all the while (past the stage's ends is black); with the click (or Left Shift) still held, the d-pad or
+  the stick (the arrows) moves the camera to frame it as you like, until the zoom is off or looks at the other fighter. The size eases from one
+  to the next, it is said at the bottom for a few seconds, and outside a fight the picture is whole again. The
+  game's own health bars are zoomed with it; the port's own text (a mode's score, the training display) is not.
+  With the left stick's click held, the right stick's click (keyboard: Left Shift and W) keeps **both fighters** in
+  the picture instead: the camera as close as shows both whole, tight when they are close and wide when they are
+  apart (2x at most, the whole picture at least), kept inside the stage; again for the whole picture. The left
+  stick's click alone still opens the menu, when it is let go.
 - **Rapid fire** (Game page): a button held down is pressed again and again, fifteen times a second, for the first
   button or for all of them; the first press is seen at once.
 - **Pure** plays exactly as the board does. **Enhanced** (the default) adds free play and your own
@@ -70,7 +83,7 @@ checked against an interpreter of the same program ([how it was made](PROGRESS.m
   of music plays as a playlist (in order or shuffled), or files named for the game's songs replace those songs. The
   `songs.txt` the game writes in the soundtrack folder names its music: each character's theme, the ladder's last
   fights and M. Bison's, player select, the characters' introductions, the winner's, continue, game over, the ending
-  and the rankings. [How →](../../README.md#a-custom-soundtrack)
+  and the rankings. [How →](../../docs/SOUNDTRACK.md)
 - Your ROM set is only ever read. Settings, save states and the board's settings memory go in your own user folder.
 
 ## Training mode
@@ -90,6 +103,7 @@ loses, and the page holds the aids below.
 | Stun readout | How much stun each player has taken, against how much stuns them (more each time they have been stunned) |
 | Fixed damage | No random part in a hit's damage (the average in its place), so a combo always does the same |
 | Health refills | Health comes back when a player has not been hit for a moment |
+| Gauge refills | Both players' super combo gauge kept full, for supers and combos into supers (filled again after a V-ism custom combo) |
 | The dummy | Stands, crouches, jumps; guards (always, after a hit, at random; high or low by the game's own rule for each attack); Alpha counters while guarding; techs throws; rises quickly after a knock-down; mashes out of stun; or is played by the game's own computer player; records and replays in three slots (one, or any at random), and can answer with a recording after guarding or being hit |
 | Start over | The round as it began, in the middle or a corner, sides swapped or not (Backspace, or a gamepad's left shoulder) |
 | Stage | Any of the 26 stages, or the game's own choice |
@@ -103,7 +117,7 @@ knockouts, infinite time).
 ## Alternative modes
 
 The in-game menu's first row, "Alternative modes", has ways of playing and watching the game that the board does not
-have. Each has a page with a Start row and its own choices, and runs until another is started or the menu's Reset.
+have. Each has a page with a Start row and its own choices, and runs until another is started or the menu's Reset game.
 
 | Mode | What it does |
 | --- | --- |
@@ -114,8 +128,8 @@ have. Each has a page with a Start row and its own choices, and runs until anoth
 | Colour editor | Change a character's colours while you watch: [custom colours](#custom-colours) |
 | Survival | One computer opponent after another on the health you have left. How many can you beat? |
 | Endless battle | Two fighters the game plays, for as long as you like, with no clock, on one stage, on stages that fade one into another, or on a floor that scrolls through them all. Touch the controls to take a fighter over |
-| Ring out | No knock-outs. Knock your opponent over the end of the stage (it is flung into the air, as by a knock-down, and falls through the floor), then jump down after it and land on the next stage. The CPU is coached to play it as a ring out, not for damage: it works you towards an end and gets out of its own corner |
-| Tag team battle | Two teams of two or three, chosen on its page: one fighter of each team at a time, all on one stage. Team 2 is the CPU (its difficulty chosen on the page), or player 2; with "Tag team" on the same page, each fighter is a person's own: co-op (players 1 and 2 against the computer's team) or 2 vs 2 for four players. **Tag style**, the default: Marvel-style, each fighter keeps a bar of its own and you tag the next one in with a gamepad's left trigger (or Start) whenever yours can act; the next one jumps in from that side with a jump attack that can hit. When a bar empties, that fighter is knocked down and lies there, not to be hit, and the next one jumps in; resting fighters get back the health that comes back by itself, the team's super combo gauge carries over, one round decides it, and a time over goes to the team with more health in all. The CPU's team tags too, as a person would. "Style: Knock-out" plays one fighter at a time instead: the one knocked down is out, and the next comes on with a full bar |
+| Ring out | No knock-outs. Knock your opponent over the end of the stage (it is flung into the air, as by a knock-down, and falls through the floor), then jump down after it and land on the next stage. The CPU plays it as a ring out, not for damage, and guards as it always does: it throws or sweeps you when your back is to an end, and keeps off its own end, getting out of a corner with a throw, a jump over you or a walk out, more or less often by its difficulty |
+| Tag team battle | Two teams of two or three, chosen on its page: one fighter of each team at a time, all on one stage. Team 2 is the CPU (its difficulty chosen on the page), or player 2; with "Tag team" on the same page, each fighter is a person's own: co-op (players 1 and 2 against the computer's team) or 2 vs 2 for four players. **Tag style**, the default: Marvel-style, each fighter keeps a bar of its own and you tag the next one in with a gamepad's left trigger (or Start) whenever yours can act; the next one jumps in from that side with a jump attack that can hit. When a bar empties, that fighter is knocked down and lies there, not to be hit, and the next one jumps in; resting fighters get back the health that comes back by itself, the team's super combo gauge carries over, one round decides it, and a time over goes to the team with more health in all. The CPU's team tags too, as a person would: when the one on is low and a partner has more (or has rested), while you are knocked down, never in the middle of your combo, and more or less often by its difficulty. "Style: Knock-out" plays one fighter at a time instead: the one knocked down is out, and the next comes on with a full bar |
 
 ## Widescreen
 
@@ -130,8 +144,8 @@ It is **off unless you switch it on**, in every preset, because it changes how t
 - The players can go to the wide picture's edges, so they can stand further apart than on the board. The stage's own
   ends are where they were.
 - The camera stops 64 short of where it did, so that the picture ends where the stage does.
-- The bars, the clock and the gauges stay in the middle. Survival, the endless battle, the stage and model viewers and
-  everything that is not a fight keep the board's 4:3.
+- The bars, the clock and the gauges stay in the middle. Survival, the endless battle, the ring out and the tag team
+  battle are wide too; the stage and model viewers and everything that is not a fight keep the board's 4:3.
 
 With it off the game is exactly the board's. Nothing here stretches the picture: the extra columns are the game's own
 stage art, which the board already holds and never showed; the planes far behind are kept inside their painting, and
@@ -151,6 +165,7 @@ The Display page (in the launcher and the in-game menu) says how the picture fit
 | --- | --- |
 | Scaling | Sharp (each pixel a crisp block), Whole pixels (every pixel the same whole number of the screen's pixels tall, a border round it), Smooth |
 | Picture shape | 4:3 (as the arcade's monitor showed it), Square pixels, Fill |
+| Shader | Off, or the picture through one of RetroArch's shaders: CRT (a curved arcade monitor), CRT Lottes, CRT Royale, CRT Guest, CRT Light, Scanlines (light, strong, OSSC or dark), xBRZ, ScaleFX, or Your own (a `.slangp` preset in the `shaders` folder beside the game's settings); the launcher chooses which of them the menu goes through |
 | Window size | 3x the board's 224 lines, or 2x to 6x |
 
 The first of each is the default, and how it has always been drawn.
@@ -188,7 +203,7 @@ holding only the sets that are not the game's. The folder is:
 | Windows | `%APPDATA%\Street Fighter Alpha 3\palettes` (paste it into Explorer's address bar; it is the `AppData\Roaming` folder in your user folder) |
 | macOS | `~/Library/Application Support/Street Fighter Alpha 3/palettes` |
 | Linux, SteamOS | `~/.local/share/Street Fighter Alpha 3/palettes` |
-| [Portable mode](../../README.md#portable-mode) | `user/Street Fighter Alpha 3/palettes` beside the launcher |
+| [Portable mode](../../docs/LAUNCHER.md#portable-mode) | `user/Street Fighter Alpha 3/palettes` beside the launcher |
 
 You can write or share them by hand: "Write the game's colours" (on the colour editor's page of the menu) puts every
 character's own colours in `palettes/original` to start from, each set up to five lines of 16 colours (`#RRGGBB` or
@@ -225,16 +240,17 @@ changed, and the test menu shows the board's own values.
 
 ## What you need
 
-- The ROM set `sfa3u` (*Street Fighter Alpha 3*, USA 980904): `sfa3u.zip` (with `sfa3.zip` beside it if your
-  collection keeps the shared files there) or a folder with the set's files, including `sfa3u.key`. The launcher checks
-  every file by checksum and tells you which is missing or different. Sets of other regions and revisions are refused:
-  the port is made from this one version's program, and its features use addresses found in it.
+- The ROM set `sfa3u` (*Street Fighter Alpha 3*, USA 980904): `sfa3u.zip` (with `sfa3.zip` beside it if your collection
+  keeps the shared files there) or a folder with the set's files, including `sfa3u.key`. The launcher checks every file
+  by checksum and tells you which is missing or different. The same release's other sets work too, each as the board
+  plays in its region: `sfa3` (Europe 980904), `sfz3a` (Asia 980904) and `sfa3h` (Hispanic 980904). Other revisions are
+  refused: the port is made from this program, and its features use addresses found in it.
 - One of: macOS 13 or later (Apple silicon or Intel); Linux x86_64 or SteamOS; Windows 10 or 11, 64-bit.
 - A gamepad or stick with six buttons is recommended.
 
 ## Playing
 
-Street Fighter Alpha 3 comes with [CPS-2 Recomp](../../README.md#playing): download it for your system from the
+Street Fighter Alpha 3 comes with [CPS-2 Recomp](../../README.md#getting-started): download it for your system from the
 [releases page](https://github.com/tmcleroy/cps2recomp/releases), open its launcher, and show it your ROM set (drop
 `sfa3u.zip` or its folder on the window, or choose the folder you keep your sets in: it finds each game's by name).
 Then press **Play** beside Street Fighter Alpha 3, or on its own page, which has its Display switches and the features

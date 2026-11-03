@@ -8,10 +8,10 @@ An unofficial native PC port of the arcade game *Street Fighter II′: Hyper Fig
 *Street Fighter II′ Turbo* in Japan) for macOS, Linux (Steam Deck included) and Windows, made by static
 recompilation.
 
-> **A first port, with its sound (this fork).** Like [Champion Edition's](../sf2ce/README.md), whose graphics and sound
-> it shares: the game as the board plays it, translated, on the toolkit's classic CPS-1 board, with the picture, the
-> six buttons and the board's music, effects and voices (ymfm's YM2151: this fork only), but none of the other
-> fighting games' features.
+> **Initial classic CPS-1 port, with sound.** The game's picture, controls and arcade music and effects run on the
+> toolkit's shared classic CPS-1 board. Board options and cheats are declared in `game.cfg`; there is no training
+> mode yet. The YM2151 uses [ymfm](https://github.com/aaronsgiles/ymfm), the BSD-3-Clause library listed in
+> [THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md). The OKI MSM6295 is implemented in `sound/okim6295.cpp`.
 
 **No game files are included.** You need your own copy of the game: the arcade ROM set `sf2hf` (World, 921209), from
 a board you own. This project cannot help you get one.
@@ -40,15 +40,8 @@ A build of `sf2ce` first lets `tools/portmap.py` move its entry points to this p
 
 ## Progress
 
-**Where it stands.** On Champion Edition's board (`cps1-classic`, the S9263B mapper, the CPS-B-21's multiplier and the
-kicks at 800176), with Champion Edition's entry points moved over, made-up play found 1,599 entries: 54,184
-instructions translated, 27 left to the interpreter, 17 of them data a guess took for code. A run of 6,000 frames
-(the title, Ryu against Ryu, then rounds against M. Bison on Ryu's stage) ran nothing in the interpreter. The sound is
-Champion Edition's (its README says how it is made), and plays the same way.
-
-**How much of Champion Edition it shares.** `tools/portmap.py` placed 16,514 of Champion Edition's 18,036 walked
-instructions (91.6%) on 970 anchors and moved 1,110 of its entry points: nearly the same program, so the features
-written for one would serve the other (`sources = sf2ce` with a `family.h`).
+**Where it stands.** Uses Champion Edition's classic board, S9263B graphics mapper, CPS-B-21 multiplier,
+extra kick inputs and sound hardware. Game-specific ROM lists, mapper ranges, DIPs and cheats stay in `game.cfg`.
 
 **The DIP switches** are as the boards left the factory (`dip` in game.cfg, `FF FC 9F`): difficulty 3 (normal), continues allowed, the demonstrations' sound. Before, the port read them all off: the easiest difficulty and no continues.
 
@@ -58,3 +51,19 @@ written for one would serve the other (`sources = sf2ce` with a `family.h`).
 every frame while a cheat is on, while a round is fought. Infinite energy for each player, infinite time and one-hit
 knockouts (player 2). The bosses can be chosen in this game, so there is no cheat for them. Each can be switched any
 time; off, the game goes on as it was.
+
+## Reproducible checks
+
+`movies/smoke_play.txt` supplies 40,000 frames of input from reset. It exercises coin/start and gameplay;
+it is a smoke route, not a completed game. Ghouls finishes its board tests later than Street Fighter II;
+its first coin/start during those tests is ignored and the next pair starts play.
+
+```sh
+make GAME=sf2hf check FRAMES=40000 MOVIE=games/sf2hf/movies/smoke_play.txt
+make GAME=sf2hf check-rollback FRAMES=12000
+make GAME=sf2hf check-online FRAMES=6000
+```
+
+The online check uses two local peers and simulated packet delay/loss; it does not test Internet play.
+The classic sound program runs on the Z80. `check-sound`'s QSound high-level-driver comparison is not applicable.
+Windows is the tested platform for this contribution; macOS/Linux builds still need verification.

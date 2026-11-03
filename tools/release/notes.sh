@@ -36,6 +36,8 @@ is included: you need your own ROM sets** ([which ones](https://github.com/tmcle
 | macOS 13 or later, Apple silicon or Intel | **CPS2Recomp-macOS.zip** |
 | Windows 10 or 11, 64-bit | **CPS2Recomp-windows-x64.zip** |
 | Linux x86_64, Steam Deck, Steam Machine | **CPS2Recomp-linux-x86_64.tar.gz** |
+| Linux ARM64 (aarch64: ARM handhelds, single-board computers) | **CPS2Recomp-linux-arm64.tar.gz** |
+| Android 9 or later, 64-bit ARM phones and tablets | **CPS2Recomp-android.apk** |
 
 \`SHA256SUMS.txt\` has the downloads' checksums. The \`update-*.txt\` files are what the launcher reads to update
 itself; you don't need them.
@@ -60,12 +62,18 @@ itself; you don't need them.
    game.
 
 ### Linux
-1. Unpack it where it can stay: \`tar xzf CPS2Recomp-linux-x86_64.tar.gz -C ~/Applications\` (any folder of your
-   own works).
+1. Unpack it where it can stay: \`tar xzf CPS2Recomp-linux-x86_64.tar.gz -C ~/Applications\` (or
+   \`CPS2Recomp-linux-arm64.tar.gz\` on ARM64; any folder of your own works).
 2. Run \`~/Applications/CPS2Recomp/cps2recomp-launcher\`. It needs only an X11 or Wayland desktop and the usual
    sound libraries (SDL 3 is built in).
 3. On the **Games** page, press **Choose folder…** and pick the folder with your ROM sets. Press **Play** beside a
    game.
+
+### Android
+1. Download the APK on your phone or tablet and open it to install it (allow installs from your browser or file
+   manager when asked).
+2. Copy your ROM sets to the phone (USB, or any file manager). In the app, on the **Games** page, press **Add ROM
+   sets…** and choose them. Press **Play** beside a game.
 
 ### Steam Deck and Steam Machine
 1. Hold the power button and choose **Switch to Desktop**.

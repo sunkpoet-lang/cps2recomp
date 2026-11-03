@@ -34,10 +34,10 @@ namespace {
     constexpr uint16_t kStageLeft = 280, kStageRight = 1000, kCameraLeft = 256, kCameraRight = 640;
     constexpr uint16_t kStartX[2] = {544, 736};
     constexpr uint16_t kCornerApart = 100;
-    constexpr uint32_t kCameraCopies[] = {0xFF8026, 0xFF82A0, 0xFF82A8, 0xFF8290};
-    constexpr uint32_t kCameraX = 0xFF8290, kCameraY = 0xFF8294;
+    constexpr uint32_t kCameraCopies[] = {At(0xFF8026), At(0xFF82A0), At(0xFF82A8), At(0xFF8290)};
+    constexpr uint32_t kCameraX = At(0xFF8290), kCameraY = At(0xFF8294);
     constexpr int kPictureFloor = 239; // the picture's line that height 0 is on, the camera at the bottom (a player on the floor is at kGround, 40: its feet on line 199, measured)
-    constexpr uint32_t kPlayersChosen = 0xFF80AC;
+    constexpr uint32_t kPlayersChosen = At(0xFF80AC);
 
     // A round's fighting, for the aids: both players in it and nobody over the most health
     bool Fighting() {
@@ -62,12 +62,9 @@ namespace {
         return false;
     }
 
-    // The hidden characters: the other forms the board has (kCharacterNames 18-23) of the characters on the screen
-    // they are chosen from, as the "Hidden characters" feature gives them for one who chooses the first form. (Gen's
-    // other form is left out: it is the style he changes to in a fight.)
-    constexpr struct {
-        uint8_t first, other;
-    } kHiddenForms[] = {{0, 23}, {2, 20}, {4, 18}, {15, 22}, {16, 21}};
+    // The hidden characters: the other forms the board has of the characters on the screen they are chosen from, as
+    // the "Hidden characters" feature gives them for one who chooses the first form (family.h)
+    using family::kHiddenForms;
     bool HiddenFormFor(int n) {
         const int who = FeatureValue("hidden_forms"); // 1 player 1, 2 player 2, 3 both
         return (who & (1 << n)) != 0;
@@ -217,6 +214,18 @@ namespace {
         }
     }
 
+    // The game's own aid: the super combo gauge kept full (in a fight, and not while a Custom Combo goes on: the gauge
+    // is spent as it begins, and filled again once it is over)
+    void Hud(Machine &, std::vector<HudLine> &, std::vector<HudBox> &) {
+        for (int n = 0; n < 2; n++) {
+            const uint32_t player = Player(n);
+            if (FeatureOn("gauge_refill") && Ram8(player + kState) == 2 && !Ram8(player + kCustomCombo) &&
+                Ram16(player + kSpecialGauge) < kSpecialGaugeFull) {
+                SetRam16(player + kSpecialGauge, kSpecialGaugeFull);
+            }
+        }
+    }
+
     // Under each player's bar: the Custom Combo's time, the combo readout and the stun line (or the stun line alone)
     void PlayerReadout(int n, const fight::Combos &combos, std::vector<HudLine> &lines) {
         if (FeatureOn("custom_combo_readout")) {
@@ -311,12 +320,11 @@ int HiddenFormOf(int n, int character) {
 void RegisterTraining() {
     Game &game = TheGame();
     AddHook(kPlayerDispatch, "PlayerStep", PlayerStep);
-    AddHook(0x00797C, "ChooseStage", ChooseStage);
-    AddHook(0x007914, "ChooseCharacters", ChooseCharacters);
-    AddHook(0x0628D8, "CharacterChosen", CharacterChosen);
+    AddHook(At(0x00797C), "ChooseStage", ChooseStage);
+    AddHook(At(0x007914), "ChooseCharacters", ChooseCharacters);
+    AddHook(At(0x0628D8), "CharacterChosen", CharacterChosen);
     game.features.push_back({"hidden_forms", "Game", "Hidden characters",
-                             "Choosing Ryu, Akuma, Chun-Li, Dhalsim or Zangief gives their hidden form instead: Evil Ryu, Shin "
-                             "Akuma, the classic Chun-Li, and Dhalsim's and Zangief's other forms. For player 1, player 2 or both.",
+                             family::kHiddenWords,
                              0, {"Off", "Player 1", "Player 2", "Both"}});
     session::Description d;
     d.player1 = kPlayer1;
@@ -366,6 +374,7 @@ void RegisterTraining() {
     d.inputWords = "What each player presses and for how many frames: the stick as a keypad number from the player's side (6 forward, "
                    "4 back, 2 down), then the buttons.";
     d.framesPrintVariable = "SFA2_FRAMES";
+    d.hud = Hud;
     d.readoutFeatures = {{"stun_readout", "Training mode", "Stun readout",
                           "Under each bar: how much stun the player has taken and how much stuns them (it drains when they are left "
                           "alone for a while)."},
@@ -387,7 +396,7 @@ void RegisterTraining() {
                                       return at == 0 ? away : at == 1 ? static_cast<uint16_t>(away | kDown) : at == 2 ? static_cast<uint16_t>(kDown | kKick2) : 0;
                                   }});
     dummy.guardActionsWords = "What player 2 does while guarding a hit: an Alpha counter (back, down-back, down with a punch or a kick; "
-                              "it costs a level of the super combo gauge, so pair it with \"Full gauge, player 2\").";
+                              "it costs a level of the super combo gauge, so pair it with \"Gauge refills\").";
     dummy.heldAction = [](int frame, uint16_t, uint16_t away) -> uint16_t {
         return static_cast<uint16_t>(away | ((frame & 1) ? (kPunch2 | kPunch3) : 0));
     };
@@ -400,6 +409,10 @@ void RegisterTraining() {
                                return at == 0 ? kDown : at == 1 ? static_cast<uint16_t>(kDown | away) : at == 2 ? away : static_cast<uint16_t>(away | kPunch1);
                            }});
     session::Register(d);
+    // (after the session's own, so it follows "Health refills"; a training aid, as the session's are)
+    game.features.push_back({"gauge_refill", modes::kTraining, "Gauge refills",
+                             "Both players' super combo gauge kept full (three levels), filled again after a Custom Combo."});
+    TrainingAids({"gauge_refill"});
     game.features.push_back({"dummy_stun_mash", "Dummy", "Mashes out of stun",
                              "Stunned, the dummy works the stick and the buttons as fast as it can, as a player does to get out sooner."});
     game.features.push_back({"dummy_computer", "Dummy", "Played by the game",

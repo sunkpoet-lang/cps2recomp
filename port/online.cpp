@@ -294,7 +294,7 @@ void Online::Stop() {
     }
     if (m_port) {
         TheGame().online = false;
-        m_port->online = false;
+        m_port->gekkoOnline = false;
     }
 }
 
@@ -302,7 +302,7 @@ bool Online::Start(Port &port, const OnlineOptions &options, std::string &error)
     m_port = &port;
     m_options = options;
     m_options.delay = std::clamp(m_options.delay, 0, kPredictionWindow);
-    port.online = true;
+    port.gekkoOnline = true;
     TheGame().online = true;
     port.SoundtrackFollow(); // (the custom soundtrack off: the board's music)
     Machine &machine = *port.machine;

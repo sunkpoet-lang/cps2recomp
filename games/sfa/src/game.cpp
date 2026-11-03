@@ -22,6 +22,7 @@ void TitleFrame(Machine &machine);
 void RegisterModes();    // modes.cpp
 void RegisterTraining(); // training.cpp
 void RegisterBattle();   // battle.cpp
+void RegisterComputer(); // computer.cpp
 void RegisterModel();    // model.cpp
 void ModelBeforeFrame(Machine &machine);
 void ModelFrame(Machine &machine);
@@ -32,12 +33,14 @@ void RegisterChoosing();  // choosing.cpp
 void ChoosingBeforeFrame(Machine &machine);
 void RegisterWidescreen(); // widescreen.cpp
 void WidescreenBeforeFrame(Machine &machine);
+void WidescreenState(Archive &ar);
 bool WidePlay();
 
 void RegisterGame() {
     RegisterModes();
     RegisterTraining();
     RegisterBattle();
+    RegisterComputer();
     RegisterModel();
     RegisterColours();
     RegisterChoosing();
@@ -76,6 +79,7 @@ void RegisterGame() {
         modes::State(ar);
         BattleState(ar);
         ModelState(ar);
+        WidescreenState(ar);
     };
     // With the arcade timing, the game's own code runs in place of the rewrites but where they carry what the port adds
     // (game.h, rewritesNeeded): the modes, widescreen

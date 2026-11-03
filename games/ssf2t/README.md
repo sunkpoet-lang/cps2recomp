@@ -21,7 +21,7 @@ timing, a custom soundtrack.
 > [report what you find](#feedback-and-contributing).
 
 **No game files are included.** You need your own copy of the game: the arcade ROM set `ssf2xjr1` (Japan, 940223)
-with its key file, from a board you own. **Only that version works.** This project cannot help you get one.
+with its key file, from a board you own. **Only the sets named below work.** This project cannot help you get one.
 
 This project is not affiliated with, endorsed by, or sponsored by Capcom. *Street Fighter* is a trademark of
 Capcom Co., Ltd.
@@ -45,7 +45,20 @@ the same program ([how it was made](PROGRESS.md)).
   launcher. Two more can be given a key or a button: all three punches at once, and all three kicks. In the collection
   it can have a layout of its own, apart from the other games'.
 - An in-game menu (Esc or `F1`; on a gamepad, the left stick's click or Start and Select together) with the
-  training mode and the other modes, save states, speed, the cheats and every feature.
+  training mode and the other modes, save states, speed (1/8 to 8x), the cheats,
+  every feature, and a Reset all options row.
+- **Zoom**: hold the left stick's click and press the left shoulder to zoom in on player 1's fighter, the right
+  shoulder for player 2's (keyboard: hold Left Shift and press Q or E). Each press for the same player goes a size
+  up, 1.25x, 1.5x, 1.75x and 2x (the model viewer's sizes: at 2x the top of a tall fighter is off the screen), then
+  back to the whole picture; a press for the other player looks at that one instead. The fighter is kept in the
+  middle all the while (past the stage's ends is black); with the click (or Left Shift) still held, the d-pad or
+  the stick (the arrows) moves the camera to frame it as you like, until the zoom is off or looks at the other fighter. The size eases from one
+  to the next, it is said at the bottom for a few seconds, and outside a fight the picture is whole again. The
+  game's own health bars are zoomed with it; the port's own text (a mode's score, the training display) is not.
+  With the left stick's click held, the right stick's click (keyboard: Left Shift and W) keeps **both fighters** in
+  the picture instead: the camera as close as shows both whole, tight when they are close and wide when they are
+  apart (2x at most, the whole picture at least), kept inside the stage; again for the whole picture. The left
+  stick's click alone still opens the menu, when it is let go.
 - **Rapid fire** (Game page): a button held down is pressed again and again, fifteen times a second, for the first
   button or for all of them; the first press is seen at once.
 - **Pure** plays exactly as the board does. **Enhanced** (the default) adds free play and your own
@@ -66,10 +79,11 @@ the same program ([how it was made](PROGRESS.md)).
   exactly as without it.
 - **A custom soundtrack**: your own music in place of the board's, with the board's sound effects and voices: a
   folder of music plays as a playlist (in order or shuffled), or files named for the game's songs replace those
-  songs. The `songs.txt` the game writes in the soundtrack folder names the music: each stage's tune and its later
-  version in a round, the final fight, the introduction and title, player select, versus, the winner's, the ranking,
-  Ryu's ending and the staff roll. `F12` switches between it and the board's music at once, mid-song.
-  [How →](../../README.md#a-custom-soundtrack)
+  songs. [The list of its songs](../../docs/SONGS.md#super-street-fighter-ii-turbo) names the music: each stage's
+  tune and its faster version once a fighter's health is low (`ryu_later`), the final fight, the introduction and
+  title, player select, versus, the winner's, the ranking, Ryu's ending and the staff roll. In this fork `F12`
+  switches between it and the board's music at once, mid-song.
+  [How →](../../docs/SOUNDTRACK.md)
 - Your ROM set is only ever read. Settings, save states and the board's settings memory go in your own user folder.
 
 ## Training mode
@@ -94,7 +108,7 @@ the page holds the aids below.
 ## Alternative modes
 
 The in-game menu's first row, "Alternative modes", has ways of playing and watching the game that the board does not
-have. Each has a page with a Start row and its own choices, and runs until another is started or the menu's Reset.
+have. Each has a page with a Start row and its own choices, and runs until another is started or the menu's Reset game.
 
 | Mode | What it does |
 | --- | --- |
@@ -159,16 +173,17 @@ and the test menu shows the board's own values.
 
 ## What you need
 
-- The ROM set `ssf2xjr1` (*Super Street Fighter II X: Grand Master Challenge*, Japan 940223): `ssf2xjr1.zip` or a
-  folder with the set's files, including `ssf2xj.key`. The launcher checks every file by checksum and tells you which
-  is missing or different. Sets of other regions and revisions are refused: the port is made from this one version's
-  program, and its features use addresses found in it.
+- The ROM set `ssf2xjr1` (*Super Street Fighter II X: Grand Master Challenge*, Japan 940223): `ssf2xjr1.zip` or a folder
+  with the set's files, including `ssf2xj.key`. The launcher checks every file by checksum and tells you which is
+  missing or different. These sets work too: `ssf2ta` (Asia 940223), the same release for Asia, and `ssf2xj` (Japan
+  940311), a later revision whose code is the same and a few of its tables are not. Other revisions are refused: the
+  port is made from this program, and its features use addresses found in it.
 - One of: macOS 13 or later (Apple silicon or Intel); Linux x86_64 or SteamOS; Windows 10 or 11, 64-bit.
 - A gamepad or stick with six buttons is recommended.
 
 ## Playing
 
-Super Street Fighter II Turbo comes with [CPS-2 Recomp](../../README.md#playing): open its launcher and show it your
+Super Street Fighter II Turbo comes with [CPS-2 Recomp](../../README.md#getting-started): open its launcher and show it your
 ROM set (drop `ssf2xjr1.zip` or its folder on the window, or choose the folder you keep your sets in), then press
 **Play** beside Super Street Fighter II Turbo. From a terminal, `cps2recomp-launcher --play ssf2t` starts it straight
 away; the game's own program (`ssf2t`, beside the launcher) runs by itself too: `ssf2t --help` lists what it takes.

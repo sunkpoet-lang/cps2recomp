@@ -337,6 +337,102 @@ when to tag and whom (the partner with the most health), and in a ring out short
   two new movies (`ringout_computer.txt`, `team_tag_computer.txt`) with make check both ways. Only headless: nobody
   has played against it yet.
 
+## The computer player: scripts (2026-10-26)
+
+The CPU is Vampire Savior's design (games/vampire_savior/PROGRESS.md, "The computer player"): an interpreter
+(`0280D4`, called each step from PlayerInControl while `+A5` is set) running scripts from the ROM, four banks of them
+for each character, and `tools/aiscripts.py sfa2` prints them all (40,947 instructions in 19 characters' scripts;
+`--character NAME` for one). Game data: nothing decoded is kept in the repository.
+
+- The computer's part of a player's record is Vampire Savior's 10h further on: where the interpreter is `+230`, each
+  bank's place `+220` to `+22C`, the instruction's word `+208`, the bank `+204`, the plan `+205`, frames left `+216`, the
+  gap `+218`, the first "if"'s nesting `+21E` and the second's `+255`. The level is `+A7`, the character `+82`.
+- The banks' tables by character: plans `0992EC`, tactics `09934C`, reactions `0993AC`, the answers `09940C`. Chance
+  tables: a tactic or back to the plan at a script's end `09AF44`, a go to a tactic `09BE44`, the Alpha counter by
+  character `09B044` (128 bytes each).
+- Eleven operations to Vampire Savior's fourteen: 00 waits, 02 walks, 04 jumps, 06 a normal, 08 a special, 0A a super
+  combo (unlike Vampire Savior's, no gauge stock is looked at or taken here), 0C if/else/endif, 0E go to a tactic, 10
+  guard, 12 what may break in, 14 a second if. Most kinds are Vampire Savior's code with the record's fields moved.
+  Alpha 2's own:
+  - Waits: 0A a normal at the other's attack if it is attacking (`027038`: by which of its boxes' zones reach, a
+    move from the table at `0270E2`); 0C so many frames, or that answer as soon as the other attacks; 0E while the
+    other's projectile is out farther than a gap; 22 a normal by the gap and the height between them (the table at
+    `026F1A`), if there is one for them.
+  - Jumps: 00 a jump (the move, the way, the frames: a move after so many frames, as Vampire Savior's kind 4) and 02
+    a special of the character's numbered 3 as its jump, with the move word's strength (only Rolento's scripts).
+  - 10: a guard if an attack is coming; kind 02 also lets it Alpha counter (`+21B`: the reeling's guard takes it when
+    the gauge has a level, `022770`) by the character's chance.
+  - 14: if (00, a test), else if (02, a test at the same nesting), else (04), a break out to the endif (06, at the end
+    of a branch done), endif (08). It skips with a routine of its own (`029284`, `029412`); the first "if" with
+    another (`029E46`).
+- Tests: 31 for both ifs, as Vampire Savior's but for 06 the super gauge at least so much (`+9E`), 0C the other
+  knocked down (`+134`), 10 and 12 the other's projectile nearer than a gap or not (the gap to its box, `028DCE`),
+  30 and 32 the other's projectile by a class of the table at `028BCE` (0 or 4, or none out; 3 and more), 3C `+5B`
+  set. None of the last four of Vampire Savior's.
+- A move word (`029BE4`): bits 1 to 3 to `+212`, `+213`, `+214` (held for a character's command normals; `+214` is
+  also a walk's and jump's way), then a normal's stance (0 standing, 2 crouching, 4 jumping), punch or kick and
+  strength a nibble each (`+100`, `+101`, `+102`), or a special's number (`+133`, in the character's own list) and
+  strength.
+- Checked: every script decodes, nothing left over, and the places the game kept against them
+  (`aiscripts.py sfa2 --against`): 7,129 places in five runs, all of them instructions found, and every step from one to
+  the next one the scripts allow (the ladder 2,398, ring out 386, tag style 3,098, the attract mode's two sides 561
+  and 686). The watch sees only the interpreter's writes, so the runs leave every rewrite out and run the game's code
+  as blocks: `CPS2RECOMP_SKIP_REWRITES=<all of them> CPS2RECOMP_WATCH_REPORTS=100000000 build/sfa2/sfa2 ... --cpu
+  blocks --watch FF8A30-FF8A33` (player 2; player 1 `FF8630`).
+- Not sure of: what the projectile classes of `028BCE` are; what `+5B` (test 3C, cleared by the wait kind 24) is;
+  which of the characters' specials the numbers are.
+- As C++ (2026-10-26, `src/computer.cpp`): ComputerThinks (0280D4: the banks, the interpreter, the instructions and
+  tests, its three ways of stepping over instructions, the waits frame by frame) and the four routines of 0280BA-029E38
+  the fighters' code calls (Chance, BrokenOff, Reactions, AnswerNow). What it calls outside stays the game's: the
+  attack coming (`027E94`), the normal at the other's attack (`027038`) and by the gap (`026EBC`), each character's
+  test of a special. D0, D1 and the flags are free for ComputerThinks, AnswerNow and BrokenOff (as Vampire Savior's:
+  the callers load D0 again, and D1's low word for the action routine they go on to; with D1 not free, the
+  differences reported were in its low word, a jump table's offset); Chance and Reactions give back every register and flag.
+  - Checked with `--check-rewrites`, the players' routines left out (layers.sh's last line) so that the game's own
+    code makes every call: about 1.9 million calls of ComputerThinks, 2.8 million of Reactions, 190,000 of Chance,
+    8,700 of BrokenOff and 2,300 of AnswerNow, none differing. The runs: the endless battle CPU against CPU
+    (`CPS2RECOMP_BATTLE_CPU=1`) at levels 0 to 31 and tiers 0, 20h and 40h (`--poke FF84A7`, `FF861A`, player 2
+    `FF88A7`, `FF8A1A`), each plan (`+205`, `FF8605`/`FF8A05`: set only as a round starts, so the endless battle's
+    one long round keeps plan 0 unless held), Dhalsim, Chun-Li and Birdie for the scripts only they have, the ring
+    out and the tag style, and check_rewrites.sh.
+  - Every instruction, test, wait and walk in the scripts was reached (counted while checking, then taken out),
+    but for what no script has (the wait 1A, operation 0E's kind 00, test 2C) and the second if's endif done (each
+    branch ends with a break out, which steps over it).
+
+## The computer plays the tag style and the ring out itself (2026-10-26)
+
+As Vampire Savior's (its PROGRESS.md, the same title): the coach, which took the CPU's controls in a ring out and
+said when it tagged, stands aside (`Description::computerPlaysModes`), and the computer's own interpreter
+(`src/computer.cpp`) has three tactics of the port's, written in Alpha 2's instructions and one of the port's own,
+kept at addresses no ROM has (`kModeScripts`):
+
+- Out of the corner (the ring out, its back within 150 of its end and nearer it than the other's): guard if an attack
+  is coming; near (40), a throw; nearer than 90, a jump forward with a jumping heavy kick after 14 frames; else a
+  walk forward. Knock over (the other's back within 100 of its end): near, a throw or a sweep (one in two); else
+  walk in, then a sweep. Tag out (the tag style, its fighter wanting to go off, `ComputerTagWanted`): the other
+  knocked down, or 160 away, a tag at once; else guard, back off to 160, then tag.
+- A computer's throw goes the way the character's own computer throw routine says (`097CCC`, by character; Ryu's,
+  `02B202`: by where the thrower stands against the middle of the picture), not by the stick or the move word:
+  a script cannot ask for the throw that sends the other behind, as Vampire Savior's can.
+- Taken in the place of a tactic of the game's (ChooseTactic) when the fight calls for one, from four to nine
+  times in ten by the difficulty (`ComputerSkill`); a plan's chance of going to a tactic taken anyway then; and a
+  wait or a walk broken off for it, on about one frame in twelve of those. Operation 16 asks the toolkit for a tag
+  (`ComputerAsksTag`); tests 3E and 40 (the computer's back, the other's, nearer its end than a word) and 42 (the
+  tag wanted) are the port's.
+- `RingOutMayWalkBack` (the Walking rewrite) is still asked: with the toolkit's check of it left out for a game that
+  plays the modes itself, side 1 won 57% and side 2 62% (below), against 64% and 59% with it; the same within the
+  noise, so it stays. `ComputerModeOf` now says no mode for a game that does not play them itself (the coach binary
+  measured below had both, until then).
+- Numbers, CPU against CPU (`CPS2RECOMP_BATTLE_CPU=1`), 12 seeds of 40,000 frames each way:
+  - The ring out: nobody playing it (`CPS2RECOMP_COACH=0`) side 1 won 53% of 337 ring outs; side 1 playing it
+    itself 64% (336), side 2 itself 59% (248, from 47%). The coach: side 1 56% (306), side 2 59% (273).
+  - The tag style (team battles of three, about 78 matches each): nobody tagging but when a bar empties 55% for
+    side 1; side 1 tagging itself 49%, side 2 itself 49%; the coach 49% and 28% (its side 2 losing). Tagging changes
+    little, as in Vampire Savior; the computer's own tags were called off 2 times in 232, the coach's 9 in 257.
+- Checked: the computer's rewrites against the game's in the two mode movies and the attract mode at three levels
+  and tiers, with no side playing the modes (`check_rewrites.sh`'s computer section), and every movie as before.
+  Only headless: nobody has played against it yet.
+
 ## Readable code
 
 Rewrites (`cps2recomp/docs/READABLE.md`), each run beside the game's own code on every call by `make
@@ -381,6 +477,9 @@ Combo's shadows, the clock held in a super's flash, things thrown, PushApart, th
 | ThrowTest: can this player throw the other now (its reach against the other's push box), and the throw's start | 0260E8 | `throws.cpp` |
 | CameraAcross, CameraUp: the camera's place across and up, its ends (the wide picture's inside), a mode's own place | 01B662, 01B6DA | `widescreen.cpp` |
 | KeepIn, KeepBothIn: the players inside the picture, the corner's push back | 0236F0, 0237BE | `widescreen.cpp` |
+| ComputerThinks: a frame of the computer player's play: its scripts chosen, their instructions run and looked at | 0280D4 | `computer.cpp` |
+| AnswerNow, BrokenOff, Reactions: the computer's answers that break in, and a script broken off | 029E38, 0295EC, 029CEA | `computer.cpp` |
+| Chance: a bit of a level's long in a table, at random | 0280BA | `computer.cpp` |
 
 Coverage gaps: the guard decision's pose 4 (never seen) and the throw test's path for helpers were not reached by the movies. The air pose (3) is, by `air_guard.txt`: fireballs and jump-ins guarded and not in the air.
 Reeling kinds 8 (`022BFA`: flung through the air, landing into kind 4's bounce) and 0A (`022C5C`: as

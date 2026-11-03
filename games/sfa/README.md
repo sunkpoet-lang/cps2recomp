@@ -18,7 +18,7 @@ to the title, the board's operator settings, cheats, save states, run-ahead, arc
 > [report what you find](#feedback-and-contributing).
 
 **No game files are included.** You need your own copy of the game: the arcade ROM set `sfa` (Europe, 950727)
-with its key file, from a board you own. **Only that version works.** This project cannot help you get one.
+with its key file, from a board you own. **Only the sets named below work.** This project cannot help you get one.
 
 This project is not affiliated with, endorsed by, or sponsored by Capcom. *Street Fighter* is a trademark of
 Capcom Co., Ltd.
@@ -42,7 +42,20 @@ block is checked against an interpreter of the same program ([how it was made](P
   launcher. Two more can be given a key or a button: all three punches at once, and all three kicks. In the collection
   it can have a layout of its own, apart from the other games'.
 - An in-game menu (Esc or `F1`; on a gamepad, the left stick's click or Start and Select together) with the
-  training mode and the other modes, save states, speed, the cheats and every feature.
+  training mode and the other modes, save states, speed (1/8 to 8x), the cheats,
+  every feature, and a Reset all options row.
+- **Zoom**: hold the left stick's click and press the left shoulder to zoom in on player 1's fighter, the right
+  shoulder for player 2's (keyboard: hold Left Shift and press Q or E). Each press for the same player goes a size
+  up, 1.25x, 1.5x, 1.75x and 2x (the model viewer's sizes: at 2x the top of a tall fighter is off the screen), then
+  back to the whole picture; a press for the other player looks at that one instead. The fighter is kept in the
+  middle all the while (past the stage's ends is black); with the click (or Left Shift) still held, the d-pad or
+  the stick (the arrows) moves the camera to frame it as you like, until the zoom is off or looks at the other fighter. The size eases from one
+  to the next, it is said at the bottom for a few seconds, and outside a fight the picture is whole again. The
+  game's own health bars are zoomed with it; the port's own text (a mode's score, the training display) is not.
+  With the left stick's click held, the right stick's click (keyboard: Left Shift and W) keeps **both fighters** in
+  the picture instead: the camera as close as shows both whole, tight when they are close and wide when they are
+  apart (2x at most, the whole picture at least), kept inside the stage; again for the whole picture. The left
+  stick's click alone still opens the menu, when it is let go.
 - **Rapid fire** (Game page): a button held down is pressed again and again, fifteen times a second, for the first
   button or for all of them; the first press is seen at once.
 - **Pure** plays exactly as the board does. **Enhanced** (the default) adds free play and your own
@@ -65,8 +78,8 @@ block is checked against an interpreter of the same program ([how it was made](P
   songs. The `songs.txt` the game writes in the soundtrack folder names the music: each character's theme, the
   introduction, player select, versus, the winner's, a new challenger, continue, every ending, the staff rolls, game
   over and the ranking.
-  [How →](../../README.md#a-custom-soundtrack)
-- Your ROM set is only ever read. Settings, save states and the board's settings memory go in your own user folder, or beside the launcher in [portable mode](../../README.md#portable-mode).
+  [How →](../../docs/SOUNDTRACK.md)
+- Your ROM set is only ever read. Settings, save states and the board's settings memory go in your own user folder, or beside the launcher in [portable mode](../../docs/LAUNCHER.md#portable-mode).
 
 ## Training mode
 
@@ -92,7 +105,7 @@ Ryu's standing jab, for one: startup 4, active 4, recovery 5.
 ## Alternative modes
 
 The in-game menu's first row, "Alternative modes", has ways of playing and watching the game that the board does not
-have. Each has a page with a Start row and its own choices, and runs until another is started or the menu's Reset.
+have. Each has a page with a Start row and its own choices, and runs until another is started or the menu's Reset game.
 
 | Mode | What it does |
 | --- | --- |
@@ -164,15 +177,15 @@ menu shows the board's own values.
 ## What you need
 
 - The ROM set `sfa` (*Street Fighter Alpha: Warriors' Dreams*, Europe 950727): `sfa.zip` or a folder with the set's
-  files, including `sfa.key`. The launcher checks every file by checksum and tells you which is missing or
-  different. Sets of other regions and revisions are refused: the port is made from this one version's program,
-  and its features use addresses found in it.
+  files, including `sfa.key`. The launcher checks every file by checksum and tells you which is missing or different.
+  The same release's other sets work too, each as the board plays in its region: `sfzbr1` (Brazil 950727). Other
+  revisions are refused: the port is made from this program, and its features use addresses found in it.
 - One of: macOS 13 or later (Apple silicon or Intel); Linux x86_64 or SteamOS; Windows 10 or 11, 64-bit.
 - A gamepad or stick with six buttons is recommended (and one more for Start, for the hidden characters).
 
 ## Playing
 
-Street Fighter Alpha comes with [CPS-2 Recomp](../../README.md#playing): open its launcher and show it your ROM set
+Street Fighter Alpha comes with [CPS-2 Recomp](../../README.md#getting-started): open its launcher and show it your ROM set
 (drop `sfa.zip` or its folder on the window, or choose the folder you keep your sets in), then press **Play**
 beside Street Fighter Alpha. From a terminal, `cps2recomp-launcher --play sfa` starts it straight away; the game's
 own program (`sfa`, beside the launcher) runs by itself too: `sfa --help` lists what it takes.

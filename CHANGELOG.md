@@ -2,6 +2,530 @@
 
 ## Unreleased
 
+- **Board and Cheats choices from a game's `game.cfg`** (#163): a game can name its board's DIP switches
+  (`board_option_N`) and cheats that write to the work RAM (`cheat_N`, if wanted only while a value holds) in its
+  `game.cfg`. They go on the same Board and Cheats pages, into the same settings and the launcher's list as the
+  features a game's sources register; a name both give stops the game with a message. `tools/check_config_features.py`
+  checks the reading of them without a game. A game that declares none runs as before.
+- **The classic CPS-1 board** (#163): `board = cps1-classic` is the CPS-1 before QSound: the 68000 at 10 or 12 MHz
+  (`cpu_clock`), its DIP switches (`dip`), the graphics mapper (`gfx_map`), program files of words high byte first
+  (`/be`), graphics files joined in groups (`+`), and its sound, the Z80 with a YM2151 ([ymfm](third_party/), the
+  second named exception of rule 4) and an OKI MSM6295, all of it in the save state (version 10). The CPS-1 games
+  with QSound and the CPS-2 games play as before.
+- **Street Fighter II: Champion Edition, Street Fighter II: Hyper Fighting and Ghouls'n Ghosts** (#163): the first
+  classic CPS-1 games, with their music and voices, the Board page and cheats from their `game.cfg`, and input
+  movies for the checks. Ghouls'n Ghosts is the collection's first platformer.
+- **Hyper Street Fighter II: The Anniversary Edition** (`hsf2`, USA 040202; the Asia and Japan sets of the same date
+  play too): every character as they were in World Warrior, Champion Edition, Hyper Fighting, Super and Super Turbo,
+  against each other, with everything the other fighting games have: training mode, the alternative modes (attract
+  mode, the stage and model viewers, survival, endless battle, ring out, the tag team battle), widescreen, custom
+  colours and the colour editor, Akuma without a code, the board's settings, cheats and online play. The program grew
+  out of Super Turbo's, and the port carries what was found there over by lining the two programs up instruction by
+  instruction.
+- **`check-release` passes for every game** (#190): Street Fighter Alpha, Alpha 2 and Super Street Fighter II Turbo
+  failed it, by design: the build with no translated code takes interrupts between instructions and translated code
+  between blocks, and in those games that moves the random number and the ladder parts. It now compares that build,
+  frame for frame, with the translated build run with `--cpu interp`, and the translated build with `--cpu blocks`;
+  the games' `release_allowed` is gone.
+
+## 1.3.0
+
+**Two more Darkstalkers games and The Punisher**: Darkstalkers: The Night Warriors and Night Warriors: Darkstalkers'
+Revenge, with training mode, widescreen and the alternative modes, and The Punisher, the second CPS-1 beat-'em-up.
+Vampire Savior Definitive's Donovan, Phobos and Pyron work again (they were broken in every download since 1.0.0), and
+with the first Darkstalkers' or Street Fighter Alpha 2's set, Definitive fights on their stages too. Also VSync,
+screenshots (F12), updating on Android from inside the app, and ROM sets in folders with accents on Windows.
+
+- **Every game's songs, listed** (#234): [docs/SONGS.md](docs/SONGS.md) names each song a custom soundtrack's files
+  can replace, game by game, without starting the game first (`--list-songs` prints one game's; `tools/songs.py`
+  writes the page). Super Street Fighter II Turbo's second version of each stage's tune is now described as what it
+  is: the faster one, once a fighter's health is down to a third (`ryu_later`).
+- **Vampire Savior Definitive's Donovan, Phobos and Pyron work again** (#230): since 1.0.0 the downloads gave them
+  another character's moves (Victor's, for Donovan) and the game started over a few moves into the fight. The build
+  made its map of Vampire Savior 2's code once, on a fresh tree's first pass, before the game's code had been found, and
+  never again; it is now made again whenever the game's entries grow, and the release build stops if it is old.
+- **ROM sets in a folder named with an accent on Windows** (#223): a set in a folder such as `Jogos\Ação` is found and
+  starts. So are the launcher beside it, and your saves, save states, screenshots and settings when your Windows user
+  name has one (João, say). The ROM reader opens files by their wide names on Windows, and the launcher keeps every
+  path as UTF-8 (recomp-common #53).
+- **Updating on Android from inside the app** (#211): the update card's **Update** downloads the new version's APK,
+  checks it against the release's `SHA256SUMS.txt`, and opens Android's installer, which asks you to confirm and
+  installs it over the app: settings, saves and ROM sets stay. The first time, Android's Settings open for you to allow
+  CPS-2 Recomp to install apps (`REQUEST_INSTALL_PACKAGES`); come back and the installer opens. **Install** opens the
+  installer again if you said not now (recomp-common #52).
+- **The first Darkstalkers' stages in Vampire Savior Definitive**: with Darkstalkers' set (`dstlk`) too, its twelve
+  stages and their music, shown as that game shows them (its board runs unseen beside Definitive's, its camera where
+  Definitive's is, the fighters drawn over it). An option puts each match on the opponent's Darkstalkers stage, where
+  it has one; training and the stage viewer have them by name. **Street Fighter Alpha 2's eighteen** too, with its set
+  (`sfa2u`), by name. The toolkit runs other games' boards beside a game's (`game.cfg`'s `guests`, `runtime/guest.h`,
+  `--guest ID=PATH`), and shows their stages behind its fighters (`fight/guest_stages.h`): each other game is described
+  once, by its port's facts (`games/<id>/guest.h`).
+- **The Punisher**, set `punisheru` (USA 930422): the second CPS-1 game, a beat-'em-up for two players (the Punisher
+  and Nick Fury), with what Cadillacs and Dinosaurs has: free play (the board's own), a stage to start at, attract
+  mode, score attack, the stage and model viewers, the cheats, the Board page and the music's names. The toolkit's
+  CPS-1 board now reads program files that come in pairs of bytes, and gives the ID the CPS-B chip has, which this
+  game checks as it starts.
+- **Darkstalkers: The Night Warriors** (#215), set `dstlk` (Europe 940705): the first Darkstalkers game, built from
+  Night Warriors' sources (its program is the one Night Warriors was made from), with everything Night Warriors has:
+  training mode, the alternative modes, the colour editor, widescreen, the zoom, Huitzil and Pyron at a switch, the
+  Board page and the music's names.
+- **Night Warriors: Darkstalkers' Revenge** (#215), set `nwarr` (Europe 950316): the second Darkstalkers game, with its
+  own sources (its program is not Vampire Savior's). Training mode, attract mode, the stage and model viewers, the
+  colour editor, survival, endless battle and ring out, widescreen with invisible walls, the camera zoom, Huitzil and
+  Pyron at a switch, the Board page and the music's names.
+- **VSync** (#185): a Display option (off unless chosen) that shows each picture at the screen's refresh, so it never
+  tears. The game keeps the board's pace, so now and then a frame stays up one refresh longer.
+- **Screenshots** (#31): F12 saves the picture as shown (readouts included, without the zoom) to `screenshots/` in the
+  game's folder, and says so at the bottom of the screen.
+- **More controllers** (#213): a controller SDL doesn't know as a gamepad, such as an arcade panel that isn't an
+  XInput one, can be given its mapping in a `gamecontrollerdb.txt` (SDL_GameControllerDB's file) beside the programs
+  or in the launcher's folder; the launcher and the games read it when they start (recomp-common #50).
+- **X-Men: Children of the Atom starts on Windows** (#212): its folder for settings and saves was named after the game,
+  and Windows takes no colon in a folder's name, so the game never started (error 267). On Windows the folder is now
+  *X-Men - Children of the Atom*; elsewhere nothing changes (recomp-common #49).
+- **Online play behind a proxy on Windows** (#194): the launcher and the games now use the proxy set in Windows' proxy
+  settings (where Clash, v2rayN and the like put theirs) to reach the online service and the updates, unless
+  HTTPS_PROXY or HTTP_PROXY is set already (recomp-common #49). The matches themselves still go straight between the
+  two games.
+- **Android says when a new version is out** (#209): the launcher checks the releases as on the other systems, and a
+  newer one gets the update card (and the Games row's dot) with **Download**, which opens the release's APK: open
+  the download and Android installs it over the app, your settings, saves and ROM sets kept (recomp-common #45).
+
+## 1.2.0
+
+**Online**: chat with the other player during a match, both players' names on the screen, and host a match from a
+game's own menu while you go on playing it alone until someone joins. The launcher's Online page comes second and
+shows what's worth a look (a match you can join, an invitation, players in the waiting room, a new version), and the
+in-game menu is shorter. Online play from an Android phone works now. Both players need this version (online protocol
+6).
+
+![Chat and names in an online match of Street Fighter Alpha 3](https://raw.githubusercontent.com/tmcleroy/cps2recomp/pr-assets/pr-assets/online-chat/chat.png)
+
+- **Chat in a match** (#196): press T, a gamepad's right stick click or the touch screen's Chat button, type, and press
+  Enter, on a keyboard or the system's own on-screen keyboard (Steam Deck, Android). How to chat is on the screen as a
+  match begins and while you type. Chat goes straight between the two games, never through the online service.
+- **Names in a match**: each player's name, as set on the launcher's Online page, under their life bar (Hide names,
+  on the Online page, hides them). The launcher gives the player's name to Join too (recomp-common #43).
+- **Host from the game**: the in-game menu's Online page has **Host a match**. Your game stays your own while you
+  wait (modes, training, cheats, the menu, save states), with HOSTING and the match's code at the bottom of the screen
+  and the match in the lobby under your name. When someone joins, the game starts over for the match; afterwards it's
+  your own again, still hosted. The row again (Stop hosting) stops it.
+- **The launcher's Online page** is second, after Games (recomp-common #40), and goes open matches, waiting room,
+  hosting a match, then the settings for a match. An invitation, matches you can join, the waiting room while someone
+  is in it and a new version stand out; a new version also puts a dot on the Games row and a card at the top of the
+  Online page (recomp-common #42).
+- **A shorter in-game menu**: it starts with its Online, Display and Game pages, and Game has the speed, Mute (Off or
+  On, rather than Sound: On or Muted) and the Board, Cheats and Sound pages (recomp-common #44).
+- **No zoom online**: in an online match both players see the whole picture, as the board shows it.
+- **Online from an Android phone**: joining or hosting a match said "Couldn't reach the online service": the game
+  asked for the system's curl, which Android hasn't. It now asks through the app, as the launcher does.
+
+## 1.1.0
+
+**Android**: an app of the launcher and every game for 64-bit ARM phones and tablets, with touch controls drawn
+beside the picture. **Another game**: X-Men: Children of the Atom, eighteen in all. **Online** works across a game's
+regions, with a waiting room and invitations. And thirty-two more regions' ROM sets play.
+
+- **The launcher is dark in Steam's Gaming Mode**, as Steam is: dark unless the system says light (recomp-common #39).
+  It was always light on the Steam Deck and Steam Machine, which have no desktop there to say.
+- **The touch controls step aside**: with no finger on the screen for five seconds they are no longer drawn, and the
+  picture is whole again; a touch brings them back (and presses what is under it, as when they are shown).
+- **Another game: X-Men: Children of the Atom** (`games/xmcota`, issue #135; ROM set `xmcota`, *X-Men: Children of
+  the Atom*, Euro 950331, the parent set and the last revision, which Fightcade plays; `xmcotah` and `xmcotab`, the
+  same release's Hispanic and Brazil sets, play too). Capcom's first Marvel fighting game, on the toolkit's Marvel
+  engine (`fight/marvel.h`) as Marvel Super Heroes is, with everything the other fighting games have: training mode
+  (with the X-Power gauge kept full), the alternative modes (attract mode, the stage and model viewers, survival,
+  endless battle, ring out), widescreen and invisible walls, custom colours and the colour editor, the hidden
+  characters with no code (Start held as a character is chosen: light punch Juggernaut, medium punch Magneto, hard
+  punch Akuma), free play, straight to the title, the board's settings, cheats and a custom soundtrack with its music
+  named ([its progress](games/xmcota/PROGRESS.md)).
+- **The Marvel engine** (`fight/marvel.h`) takes the first game of the engine as it is: a frame of another layout
+  (`frameTimeAt`, `framePictureAt`, `framePictureMask`), an attack's phase in other bits (`attackPhaseMask`), a camera
+  that each stage's routine keeps between its ends itself (`keepCameraPlaces`, each with where the stage's code goes
+  on), and a camera whose step down goes by a way of its own (`cameraWayDown`). The other Marvel games describe none of
+  these and run as before.
+- **Online across regions**: two players with different regions' sets of a game (`mvsc` and `mvscj`, say: the sets
+  `other_set` lists) play each other, as the host's region. A game's `online_words` lists the words of the program
+  where its sets differ as the game reads them (the region, the checksum, Super Turbo's revised tables, the bytes a
+  ROM check adds up, data read past a table); the host sends its values there with its state and the joining side
+  takes them for the match (protocol 5). The build hash, which the hello and the online service compare, is now the
+  game's own set's (as built), not the player's. The `region_at` hook reads the program as it runs and is always
+  there (a game's own set unchanged: the same `--hash-log`). `JOIN_ROM=<set> make check-online` checks it.
+  Best effort: a word the list lacks stops the match as a desync does.
+- **Android** (issue #104): `CPS2Recomp-android.apk`, the launcher and every game in one app for 64-bit ARM phones and
+  tablets (Android 9 and later, Vulkan). The games show a stick, their buttons, Coin, Start and Menu on the screen,
+  beside the picture (`port/touch.cpp`; a gamepad hides them), and Back opens the in-game menu. The launcher's
+  **Add ROM sets…** copies the sets chosen with the system's picker into the app's folder, which a computer sees over
+  USB. Each game is a library run in a process of its own (`android/`, `tools/release/android.sh`, `make android`),
+  so the Multi game page hands from one game to the next as elsewhere; online play works with any other system.
+  The Display page's shaders work there too, through OpenGL ES 3 (librashader built for Android by
+  `tools/librashader.sh --android`; the presets unpacked by the app). The presenter draws an overlay over the picture
+  (`Presenter::SetOverlay`, with or without a shader). recomp-common: the launcher on Android, and the sidebar's list
+  scrolled with a finger.
+- **Zoom from the menu**: a Zoom row on the in-game menu's Display page (Off, Player 1, Player 2, Both fighters), kept
+  in step with the zoom's buttons, in every game that zooms; and on a touch screen a Zoom button, for both fighters.
+
+- **Online asks the service less often**, to stay within its free daily allowance. The launcher's Online page checks
+  every 10 seconds, or every 20 while the launcher isn't the window in front (it was every 5), and asks for the waiting
+  room and the open matches in one request (`POST /v1/room` with `lobby: true`). A waiting host asks every 2 seconds,
+  then every 5 after two minutes and every 10 after ten (it was every second and a half), and has its code again when
+  it runs out after 30 minutes instead of asking about a dead one. The lists say "Updates every 10 seconds" and show a
+  spinner while they're fetched. The service keeps the lobby in memory, told by each match at most every 10 seconds,
+  and keeps a waiting room player or a listed match for 30 and 25 seconds after they're last heard from.
+  recomp-common: `RoomCheckIn::lobby`, `Room::matches`.
+- **Training mode: Gauge refills** in Street Fighter Alpha 2 and 3, Alpha 2 Gold and the Vampire Savior games (issue
+  #174), as the other fighting games have it: both players' super combo gauge (in the Vampire Savior games, their
+  special gauges) kept full in a session, for practising supers and combos into them. In Alpha 2 and 3 it waits for a
+  Custom Combo to end before filling the gauge again. Alpha 2's Alpha counter dummy now points to it.
+- **Play at the top** of each game's page in the launcher, right under its name and the lines about it.
+- **Online: a waiting room, with invitations** (#155). The Online page lists the other players whose Online page is open
+  and who have a name, and **Invite** hosts a match in the game chosen for one of them (`--net-invite TO:FROM`,
+  `--net-invite-name NAME`; the match isn't listed). The invitation waits on their Online page with Accept (joining
+  its code), Decline and Block; the host's wait says "Invited NAME", then "NAME declined" or "NAME couldn't be
+  invited". "Let others invite me" takes a player out of the room; blocked players see nothing of each other. The
+  service (`online/`) has a Room Durable Object, kept in memory, which launchers check in at every five seconds
+  (`POST /v1/room`); a player's id is made from a secret only their launcher keeps (`launcher.ini` `[online] room`).
+  recomp-common #34: `Collection::room`, `Online::invite_argument`.
+
+- **The launcher keeps a series' games together**: the Street Fighter Alpha games, the Darkstalkers games and the
+  Marvel games are each one row in the sidebar that opens to show them, with a page of their own to play any of them
+  (recomp-common: `CollectionGame::series`). A game's series is `series` in its `game.cfg`; Super Street Fighter II
+  Turbo is in Street Fighter II, a row of its own until another version comes.
+- **Online: arcade while waiting** (#159). A switch under Host a match, on the Online page and a game's Online card
+  (recomp-common #32, `--net-arcade`), lets the host play the game alone until someone joins. The match's code and
+  "WAITING FOR A CHALLENGER" are said at the bottom of the screen. The one who joins is sent the game as it is then,
+  rather than from the board's reset, and presses Start to challenge (protocol 4: the welcome says whether the host's
+  player is in already). A player who comes and goes quiet before the match begins is let go after 5 seconds.
+  `ARCADE=1 make check-online` checks it.
+- **Other regions' ROM sets** (issue #161): 32 more sets play, the same release of a game sold in another region, whose
+  program is the game's own code with another region in it. Each plays as the board does in its region (its warning
+  screen, its names): Marvel vs. Capcom's `mvscu`, `mvscj`, `mvsca`, `mvsch`, `mvscb`; Marvel Super Heroes' `mshu`,
+  `mshjr1`, `msha`, `mshbr1`; MSH vs. SF's `mshvsfu1`, `mshvsfj2`, `mshvsfh`, `mshvsfa`, `mshvsfb1`; X-Men vs. SF's
+  `xmvsfur1`, `xmvsfjr2`, `xmvsfar1`, `xmvsfh`; Alien vs. Predator's `avsp`, `avspj`, `avspa`, `avsph`; Super Gem
+  Fighter's `pfghtj`, `sgemfa`, `sgemfh`; Puzzle Fighter's `spf2ta`; Alpha's `sfzbr1`; Alpha 3's `sfa3`, `sfz3a`,
+  `sfa3h`; and Super Turbo's `ssf2ta` and `ssf2xj` (a later Japanese revision whose code is the same). Every clone set
+  in MAME's driver was compared with the game's own, deciphered, word by word; the rest are other revisions. A game's
+  `game.cfg` lists them (`other_set`), and `region_at` where the region is in an instruction rather than the header
+  (the port gives the variable the set's own value); the launcher finds them by name and says which it found.
+  `docs/TOOLKIT.md` has how a set is found to belong.
+- **CI is quicker**: SDL 3, librashader and the shader presets are built once and kept between runs (by the scripts
+  that make them), the compiler's objects too (ccache); a pull request's Mac build is Apple silicon alone
+  (`MAC_ARCHS`); a change of words only (the README, `docs/`) runs the audit and builds nothing; and a pull request's
+  older run stops when a newer commit comes.
+
+## 1.0.0
+
+The first full release, no longer a beta. **Online play** for every game: rollback netcode, matches hosted with a code
+or listed in a lobby, joined from the launcher's new Online page, with the ping and win streaks on screen and a
+dropped player let back in. **Three more games**: Street Fighter Zero 2 Alpha, Marvel Super Heroes vs. Street Fighter
+and Marvel vs. Capcom, seventeen in all. And a much shorter README, with a page for each big feature.
+
+- **Online: both players on the same version.** The launcher shows its version at the top of the sidebar; an open
+  match says its host's version, and one on another version is greyed and can't be joined (recomp-common #31); the
+  service refuses a join from another version, and the games' handshake does too (protocol 3, the version in the
+  hello: `RECOMP_VERSION`, from `VERSION`).
+- **The README, much shorter**, with a page for each big feature: `docs/TRAINING.md`, `ONLINE.md`, `MODES.md`,
+  `PICTURE.md`, `SOUNDTRACK.md`, `LAUNCHER.md`, with screenshots (the Alternative modes menu, survival, ring out, the tag
+  team battle, the stage viewer, the launcher's Games, Features, Multi game and Online pages, taken anew). **The lobby
+  follows your name** (recomp-common #30): with Your name set, a match you host is listed; without, it's joined only by
+  its code. The Online card's separate switch is gone.
+- **Another game: Marvel vs. Capcom: Clash of Super Heroes** (`games/mvsc`, issue #135; ROM set `mvsc`, *Marvel Vs.
+  Capcom: Clash of Super Heroes*, Europe 980123, the parent set and the one competitive play uses), the last Marvel game
+  on the board, made from Marvel Super Heroes vs. Street Fighter's program and on the same shared engine
+  (`fight/marvel.h`), with nothing new needed in it. The game as the board plays it, translated whole (its 68000 program,
+  and its sound program, Capcom's driver 1.30) and checked, with everything the other Marvel games have: a **training
+  mode** (hit boxes, frame data, its meter and log, input display, combo readout, health, gauge and partner refills, a
+  dummy that records, replays and guards, start over, any of the ten stages), the **alternative modes** (attract mode
+  three ways, the stage viewer and its infinite stage, the model viewer, the colour editor, survival, endless battle,
+  ring out), **tag-team co-op and 2 vs 2** for up to four people, **widescreen** and invisible walls, the **zoom**,
+  **custom colours** (files, PalMod's mvc.06a, the editor), the **hidden characters** with no code (Start held as War
+  Machine, Hulk, Venom, Chun-Li, Morrigan or Mega Man is chosen: Gold War Machine, Orange Hulk, Red Venom, Shadow Lady,
+  Lilith, Roll), and the features every game has: free play (the game's own), straight to the title, the board's
+  settings (the Board page, with its Mode select and Flickering), cheats, save states, run-ahead, arcade timing and a
+  custom soundtrack (its music named) ([its progress](games/mvsc/PROGRESS.md)).
+- **Another game: Marvel Super Heroes vs. Street Fighter** (`games/mshvsf`, issue #135; ROM set `mshvsf`, *Marvel
+  Super Heroes Vs. Street Fighter*, Europe 970625, the parent set and the one competitive play uses), X-Men vs. Street
+  Fighter's sequel, on the Marvel games' shared engine (`fight/marvel.h`). The game as the board plays it, translated
+  whole (its 68000 program, and its sound program, Capcom's driver 1.31) and checked, with everything the other Marvel
+  games have: a **training mode** (hit boxes, frame data, its meter and log, input display, combo readout, health and
+  gauge refills, the partner refilled too, a dummy that records, replays and guards, start over, any of the twelve
+  stages), the **alternative modes** (attract mode three ways, the stage viewer and its infinite stage, the model viewer,
+  the colour editor, survival, endless battle, ring out), **tag-team co-op and 2 vs 2** for up to four people,
+  **widescreen** and invisible walls, the **zoom**, **custom colours** (files, PalMod's mvs.06a, the editor), the
+  **hidden characters** with no code (Start held as Captain America, Spider-Man, Blackheart, Zangief, Sakura, Dan or
+  Akuma is chosen: U.S. Agent, Armored Spider-Man, Mephisto, Mech-Zangief, Dark Sakura, Shadow, Cyber-Akuma), and the
+  features every game has: free play (the game's own), straight to the title, the board's settings (the Board page,
+  with its Mode select), cheats, save states, run-ahead, arcade timing and a custom soundtrack (its music named)
+  ([its progress](games/mshvsf/PROGRESS.md)).
+- **The Marvel engine takes a game that keeps a tag team's characters in records of their own** (`fight/marvel.h`,
+  with `playerAt` in `fight/session.h`, `fight/alternative.h` and `fight/battle.h`): Marvel Super Heroes vs. Street
+  Fighter does not swap the records at a tag, as X-Men vs. Street Fighter does, but keeps which is on point; and a
+  camera whose step works on a copy of its place (`cameraWorkX`/`Y`), kept between its ends in two pieces. The frame
+  copy X-Men vs. Street Fighter and its sequel share is the toolkit's (`marvel::CopyFrameBoxSets`). Marvel Super
+  Heroes and X-Men vs. Street Fighter run exactly as before (the same hash logs over their ladders and every mode).
+- **Street Fighter Zero 2 Alpha** (`games/sfz2al`, the set `sfz2al`, Asia 960826, #135): Alpha 2's later revision,
+  the one played online, with the EX forms of Ryu, Ken, Sagat, M. Bison, Zangief and Dhalsim, Evil Ryu and the
+  classic Chun-Li. It builds Street Fighter Alpha 2's sources, as Vampire Savior 2 builds Vampire Savior's, so it has
+  everything that port has: the training mode with every aid, attract mode, the stage and model viewers, the colour
+  editor, survival, endless battle (and the Multi game page), ring out, the tag team battle with the CPU tagging and
+  coached, the CPU's scripts as readable C++, widescreen and invisible walls, the zoom, the hidden characters at a
+  switch, the board's settings, the music's names. Alpha 2's sources now name their places through `At()` and
+  `AtA5()` (Alpha 2 itself plays the same, frame for frame); this game's `family.h` says where each is here and what
+  differs: the characters with Super Street Fighter II's ways (a byte of the player's, not two numbers), a stun's
+  length, the gauge for a knock-down, pushing apart, the hit test's attack box, M. Bison's and Chun-Li's other forms
+  and the rest, each checked by the rewrites' check on this game's own code. How a place is looked up is one piece of
+  the toolkit now (`runtime/places_in.h`), for Vampire Savior's family too.
+- **Online: win streaks.** In the fighting games, "STREAK N" under a side's life bar once it has won two or more
+  matches in a row against the other player (counted when both have pressed Start; a match is won with
+  `battle::Description::roundsToWin` rounds, 2 unless a game says: X-Men vs. Street Fighter's tag match, 1). The round's
+  result comes from the fighting toolkit (`battle::RoundResultNow`); each is counted once, a second's quiet before
+  the next, so a frame rollback runs again is not counted twice. Both machines count alike.
+- **Online: the cheats are off during a match**, on both sides (no damage for the host's player made it no match);
+  the host's Game and Board features still carry over. **Join with a code** on the launcher's Online page: a code for
+  a match in any of the games, Join; the service says which game it is for (`GET /v1/code/CODE`) and the launcher
+  starts that one (a game whose ROM set isn't added is said, with Add…). The game sends its name and protocol to the
+  service with every match now, not only a listed one.
+- **What online play needs of every game, written down and checked**: `docs/TOOLKIT.md`'s "Online play: what every
+  game must keep to" (everything a game's sources keep between frames in its save state; play-changing features in
+  Game, Board or Cheats), pointed to from `CONTRIBUTING.md` and `docs/RELEASING.md`; a release's checks
+  (`tools/release/checks.sh`) run `check-rollback` and `check-online` for every game.
+- **Online: the ping and the input delay, each a switch** (each player's own), on the launcher's Online page under In
+  a match and on the Features page (their category, Online): **Ping** (on in Enhanced) and **Input delay** ("DELAY 2",
+  off unless chosen). The leave prompt: in a match, Esc (or the menu's button) asks **Leave the match?** over the game,
+  which goes on; Confirm leaves, Back stays (drawn by the port, over the readout, which the fighting games' sources
+  set every frame). The Online page shows Open matches first. **PRESS START TO JOIN**
+  at the bottom until this side's player has pressed Start in the match. On the Online page, matches in a game whose
+  ROM set isn't added are greyed, with **Add…** to choose it, and those of a game this launcher hasn't are greyed too.
+- **The launcher's Online page**: after Multi game in the sidebar, every game's open matches in the lobby, each with
+  its game and Join, and **Host in the lobby** in any of your games, under your name (recomp-common's
+  `Collection::lobby`). The service keeps one lobby for every game now: `GET /v1/lobby?protocol=N` lists them all,
+  each with its game; `GET /v1/lobby/GAME` still lists one game's.
+- **Online: the wait said in short lines**, the match code on a line of its own in green and "Listed in the lobby"
+  under it (a readout line can now have a colour: `HudLine`'s `r`, `g`, `b`). The one long line flickered: with its
+  dots it grew wider than the picture, and a line wider than the picture is not drawn.
+- **A lobby for online play** (opt-in): on the Online card, **List my matches in the lobby** and **Your name**; a
+  listed host's match shows under **Open matches** on other players' cards for the same game (and the same protocol),
+  to join with a press, until someone has joined it or its host stops waiting. The service keeps each game's list in a
+  Durable Object of its own (`GET /v1/lobby/GAME`); the game lists itself with `--net-list` and `--net-name NAME`.
+- **Only the games you have**: a switch on the launcher's Games page (once a game is set up; off unless you switch it
+  on) leaves the games you have not set up out of the Games page, the Features page (their features, and their names
+  in its notes) and the Controllers page, for a player who plays one or two of them. **Choose folder…** still finds
+  the rest. (recomp-common: a collection's `[games] installed_only`.)
+- **Online: the ping on screen, and coming back after a drop.** "PING 42 ms" at the bottom all through a match
+  (the time there and back, the frame's wait to read a packet taken off), or "WAITING FOR THE OTHER PLAYER" when
+  they have been silent a second. When the other side leaves or goes silent, a host's window stays open and waits
+  for them again, with the same code (the service gives it back to the host that had it), and a joining side whose
+  connection dropped joins again every few seconds until it is back; both then start over from the board's reset.
+  Every match now begins with the host's game state sent whole to the joining side (compressed, in pieces, again
+  until all have come), so the two begin exactly alike however they got there.
+- **Online play with a code, anywhere**: Host gives a match code (`K7Q-M2X`) that the other player types into Join;
+  nothing needs forwarding on either router. A small service (`online/`, a Cloudflare Worker) introduces the two:
+  each game asks a STUN server what address the internet sees its socket at, the host registers with the service and
+  is given the code, and the other player, giving the code, is told the host's addresses and the host theirs; then
+  both send to each other's until one answers (UDP hole punching). Nothing of the match goes through the service.
+  `--join` takes a code or an address; `--net-service URL` (or `off`). The game asks the service with the system's
+  curl, as the launcher's updates do (no console window on Windows).
+- **Online play from the launcher**: a game's page has an **Online** card under Play, with **Host** (and the
+  addresses this machine can be joined at: the home network's, Tailscale's) and **Join** (the host's address, kept
+  for next time). The game's window opens at once and says it is waiting for the other player, or joining the host,
+  until the match begins (Esc gives up); a host that does not answer in 30 seconds is said so.
+- **Online play, a first version** (#70): `--host [PORT]` and `--join ADDRESS[:PORT]` (after the launcher's
+  `--play ID --`) play a match between two machines over UDP, with rollback: each side's own controls held back 2
+  frames (`--net-delay`), the other's guessed up to 8 frames and the frames guessed wrong run again unseen and
+  unheard (`port/netplay.h`). The two make sure they are the same game and build; the joining side takes the
+  host's board settings and the features that change play, for the match only; each side keeps time with the
+  other; and every 60 frames they compare a hash of the game, stopping on a desync. The menu, save states, speed,
+  run-ahead and the other modes are off during a match. `make GAME=<id> check-online` (`tools/check_online.sh`)
+  plays two copies against each other on one machine over a bad connection made up (`--net-fake`), and replays the
+  host's record of both players' controls (`--record`) without the network to check the match is what they did
+  (`--hash-no-sound`: the state hash without the sound side, as online play's); every game passes.
+- **Getting ready for online play** (#70): `make GAME=<id> check-rollback` (`tools/check_rollback.sh`,
+  `--rollback-test SEED`) runs made-up play as online play's rollback would, the other players' controls late and
+  guessed and the frames guessed wrong put back and run again, and checks that it goes exactly as without. Every
+  game passes, with every feature that changes play switched on. A frame run again need not be drawn
+  (`Machine::drawing`), which makes a rollback a quarter of the work: on the Steam Deck a rollback of 9 frames
+  takes under 12 ms. `--hash-no-picture`: the state hash without the picture.
+- **Fixed: widescreen after loading a save state.** The camera's place a frame ago, which the wide picture is drawn
+  from, is in the save state (save states are now version 8; older ones still load). Without it the first frame
+  after a load was drawn from the camera before the load, and in Vampire Savior, the Marvel games and X-Men vs.
+  Street Fighter the players could be kept in by the wrong edge for that frame.
+- **Fixed: Puzzle Fighter's "Player 1 wins quickly" after loading a save state** could send its counter gems a
+  pair late (or twice): the step it watches is in the save state.
+- **Shader and Zoom on the Multi game page**: the Endless battle card has **Shader** (every game through the same
+  shader, or each as its own Display page has it) and **Zoom** (**Both fighters**: every game's camera on the two
+  fighters from the start, `--zoom 1:3`), for that run only. One shader for every game for good is the launcher's
+  Features page's Shader, as before.
+
+- **Zooming with a shader closes in on the monitor**: zoomed, the shader draws the whole picture and the camera
+  closes in on what it drew, scanlines, mask and all, sharp, as a camera would on a monitor (it was given the zoomed
+  picture, blended up to the board's size, which looked muddy). The readout's panels stay where they are, at their
+  size, without the shader.
+
+## 0.4.0-beta.8
+
+Shaders: the Display page's Shader draws the picture through a RetroArch slang preset (CRT, CRT Lottes, CRT Royale,
+CRT Guest, CRT Light, four kinds of scanlines, xBRZ, ScaleFX or your own), on macOS, Linux (the Steam Deck and Steam
+Machine too) and Windows, with the launcher choosing which the in-game menu goes through. The speed's line at the
+bottom goes after a few seconds.
+
+- **Shaders on Linux** (the Steam Deck and Steam Machine too): the Linux releases carry `librashader.so` (built from
+  source by `tools/librashader.sh`, now for Linux as well; the build image has Rust) and the presets beside the
+  games, so the Display page's Shader is there as on macOS.
+- **Shaders on Windows**: the Windows release carries `librashader.dll` (cross-compiled with MinGW-w64 by
+  `tools/librashader.sh --windows`, its C++ and GCC runtimes linked in) and the presets beside the games. Every
+  system now has the Display page's Shader.
+
+- **More shaders, and only your favourites in the menu**: the Display page's Shader has CRT Light (zfast-crt) and four
+  scanlines, light (scanline-fract), strong (sharp-bilinear-scanlines), OSSC (ossc) and dark
+  (integer-scaling-scanlines, best with Whole pixels), in place of the one; xBRZ and ScaleFX come after them. On the
+  launcher's Features page, under Shader, **In the game's menu** → **Choose** has a switch for each shader: the
+  in-game menu's Left, Right and Enter go past those switched off (Off and the one chosen stay). Kept in each game's
+  settings.ini, `[menu] display_shader = 1,7` (recomp-common's `kFeatureMenuChoices`, which any long choice can have).
+
+- **Shaders** (macOS for now; #121): the Display page's **Shader** draws the picture through one of RetroArch's slang
+  shader presets, by [librashader](https://github.com/SnowflakePowered/librashader) 0.12.1 with OpenGL: CRT
+  (crt-geom-mini), CRT Lottes, CRT Royale, CRT Guest (advanced, fast), Scanlines, xBRZ (freescale) and ScaleFX, or Your own,
+  the first `.slangp` in `shaders/` beside settings.ini. `--shader FILE.slangp` takes any preset. The picture keeps its
+  shape and size; zoomed, the shader is given what the camera sees. The menu is shown without the shader. librashader
+  needs the window's own OpenGL, which SDL's GPU API does not hand out, so with a shader the window is an OpenGL
+  window; switching to or from Off makes the window again where it is. Without `librashader.dylib`, or with a preset
+  it cannot make, the picture is drawn as before (and stderr says why). macOS's OpenGL stops at 4.1, so a preset whose
+  shaders need more (crt-geom itself, crt-hyllian) cannot be made there: CRT is crt-geom-mini. The app carries librashader (built from
+  source by `tools/librashader.sh`, which needs Rust) and the presets (copied by `tools/shaders.py` from a pinned
+  slang-shaders commit, each file keeping its own licence).
+- **The speed's line** ("SPEED x1.5", "SPEED 1/2") goes after two and a half seconds, as the zoom's does, and
+  comes back each time the speed changes; it stayed at the bottom all the while the game was not at full speed.
+  STOPPED and FAST FORWARD stay while they last.
+
+## 0.4.0-beta.7
+
+Two more games, Street Fighter Alpha 3 and Super Street Fighter II Turbo, with what the other fighting games have
+(Super Turbo's tag team battle too): fourteen in all. A multi-game endless battle that hands off from one game to the
+next. Zoom on one fighter or on both in every fighting game. The CPU now plays the tag style and the ring out itself
+in the Vampire Savior games and Alpha 2 and 3, and every Alpha's and Vampire Savior's computer player is readable C++.
+Speeds from 1/8 to 8x and Reset all options in the menu, your games in your own order on the launcher, a launcher that
+fits a small window, portable mode, and a download for Linux ARM64.
+
+- **Faster speeds, and finer ones**: the menu's Speed goes from 1/8 to 8x in 13 steps, each about 1.4 times the last
+  (1/8, 1/6, 1/4, 1/3, 1/2, 3/4, Full, 1.5x, 2x, 3x, 4x, 6x, 8x; - and = step through them). Sped up, every frame's
+  sound is played, faster by as much, as slowed it is played slower. `--stats` says the screen's ticks when they
+  were not the game's frames.
+- **Reset all options**, above Reset game (Reset renamed): every feature back to the launcher's default, the Enhanced
+  preset, in settings.ini too, and the speed back to full. The game's own Test menu settings and the controls stay.
+- **Street Fighter Alpha's computer player is readable C++** (`games/sfa/src/computer.cpp`), Alpha 2's interpreter
+  with Alpha 1's own (one if, fewer waits and tests, one kind of jump, a think time by character), checked call by
+  call against the game's code with nothing differing (about 910,000 calls). It plays the ring out as the game always
+  has: Alpha 2's tactics for the modes made no difference here CPU against CPU, and the coach did worse.
+  `tools/aiscripts.py sfa` prints Alpha 1's scripts (its tables found by `lea (pc)`, its skipping routines' `move.w
+  (a0)+,d1` runs counted).
+- **A stuck random number in the fighting modes** (survival, the endless battle, the ring out) of Alpha 1-3 and the
+  Vampire Savior games: a match begun from the character choice was given a random number of the toolkit's, and 130
+  of the 65,536 are ones the game's own routine keeps going round between two (or one), so every choice it made at
+  random came out the same. In Alpha 1's ring out the computer then broke in on itself without end, and the game hung
+  (1 test run in 36). Now the game's own number is stepped on so many times at random (`Description::randomNext`,
+  `battle::CapcomRandomNext`).
+
+- **Zoom** is gentler: the size eases more slowly and never faster than about 0.5x a second going in (1.2x coming
+  out), and the camera keeping both fighters in the picture goes closer only when it could go 0.15x closer and eases
+  its aim between them, so a fight's every step does not move it (it felt nauseating). A fighter can leave the picture
+  for a moment on a quick jump away while it catches up.
+- **Multi game**: the rest of the Display page every game has, for the whole run: **Invisible walls**, **Scaling**,
+  **Picture shape** and **Window size**, each also "As each game is set" (the default), given after the game's own
+  settings as Screen and Picture are, and kept nowhere. In a window, the next game opens where the one before was and
+  as tall (the game ending for the next writes its window's place to a file in the temporary folder, which the next
+  reads within the minute and removes); it opened where the system puts a new window, so a window moved stayed behind.
+- **Zoom on both fighters** in every fighting game: the left stick's click held and the right stick's click (keyboard:
+  Left Shift and W) keeps both in the picture, the camera as close as shows both whole (2x at most, the whole picture
+  at least): tight when they are close, wide when they are apart, kept inside the stage. Again for the whole picture;
+  a shoulder looks at one of them instead. How much room a fighter takes is the game's (`Game::focusLift`,
+  `focusTall`; `modes::Focus(place, lift, tall)`): the Vampire Savior games 128 lines tall, Alpha 1-3 112, Super Turbo
+  104, Super Gem Fighter 76, the Marvel engine 136. `--zoom 1:3` and `--keys TICK:z2` for tests.
+- **Street Fighter Alpha 3's CPU plays the tag style and the ring out itself**, as Alpha 2's and the Vampire Savior
+  games' do: its computer player is readable C++ now (`games/sfa3/src/computer.cpp`, Alpha 2's interpreter with Alpha
+  3's own: the isms' super combos and custom combos, a throw instruction, cancels), checked call by call against the
+  game's code with nothing differing (about 1.45 million calls), and it has the port's tactics for the modes. CPU
+  against CPU it won 53% and 64% of ring outs against the game's own play (47% and 53% with nobody playing the mode;
+  the coach 53% and 45%). In the tag style it tags only while the other is knocked down: in this game every tag
+  costs the side that makes it (the coach's too), and that costs least. `tools/aiscripts.py sfa3` prints Alpha 3's
+  scripts, its own instructions named, and `--check` says whether a script has what a skipping routine of its does not
+  know inside an if.
+
+- **Street Fighter Alpha 2's CPU plays the tag style and the ring out itself**, as the Vampire Savior games' does: its
+  own scripts, run by its interpreter (`games/sfa2/src/computer.cpp`), have three tactics of the port's: out of a
+  corner (a throw, a jump over you, a walk out), knocking you over your end (a throw or a sweep), and in the tag
+  style backing off and tagging; its own guard on all the while, which the toolkit's coach (now Super Turbo's alone)
+  cost it by taking its controls. CPU against CPU it won 64% and 59% of ring outs against the game's own play (53%
+  and 47% with nobody playing the mode; the coach 56% and 59%). `ComputerModeOf` says no mode for a game whose
+  computer does not play the modes itself. `tools/aiscripts.py` names Alpha 2's jumps' ways as its jump reads them
+  (1 forward, 0 straight up, FF back), and the tests of the other's jump with them.
+
+- **Zoom** in every fighting game: Street Fighter Alpha, Alpha 2, Alpha 3, Super Turbo, Super Gem Fighter, Marvel
+  Super Heroes and X-Men vs. Street Fighter, as in the Vampire Savior games (the left stick's click and a shoulder;
+  the d-pad to frame the fighter; Left Shift, Q, E and the arrows on the keyboard). The toolkit's `modes::Focus`
+  (`fight/alternative.h`) gives a game its `Game::focus` from where its fighter stands: only while a round is fought
+  and not in the model viewer, looking so many lines above the feet (Alpha 1-3 44, Super Turbo 40, Super Gem Fighter
+  28, the Marvel engine 40, for the size of their fighters). Each game's place is its model viewer's with the wide
+  picture's columns counted (`widescreen.cpp`); the Marvel engine's is in `fight/marvel.cpp`, from where it puts the
+  training mode's boxes, a tag-team game's point characters being its first two records.
+- **Zoom**: the camera keeps its fighter in the middle at every size, past the stage's ends too (black there); it
+  was kept inside the picture, so near an end the fighter was off to the side, and it trailed a dash. It eases only
+  when it changes fighter or size. With the left stick's click held, the d-pad or the stick moves it to frame the
+  fighter as the player wants (kept until the zoom is off or looks at the other fighter; `Zoom::Pan`), and the keyboard has the zoom too: Left
+  Shift held, Q and E for players 1 and 2, the arrows to move it. Vampire Savior's looks a little lower (44 lines
+  up from the feet, not 56), so at 2x the feet and their shadow are in the picture.
+- Street Fighter Alpha 2's computer player as readable C++ (`games/sfa2/src/computer.cpp`): the script interpreter
+  (ComputerThinks) and the routines the fighters' code calls (Chance, BrokenOff, Reactions, AnswerNow), checked call
+  by call against the game's code with nothing differing (about 1.9 million calls, every instruction and test the
+  scripts have). The CPU plays as before.
+- **Zoom** (Vampire Savior, Definitive, Vampire Savior 2, Vampire Hunter 2): a gamepad's left stick's click held
+  and the left shoulder pressed zooms the camera in on player 1's fighter, the right shoulder on player 2's, a size up
+  each press (1.25x, 1.5x, 1.75x, 2x, the model viewer's sizes), then back to the whole picture. The camera eases
+  from size to size and follows the fighter; "ZOOM 1.5x  PLAYER 1" is said at the bottom for a few seconds, and
+  outside a fight the picture goes back to its own size. It is the window's alone: the game, its save states,
+  movies and screenshots are as they were. While the click is held the shoulders are not the game's (the right one
+  is hard punch), and with a zoom to work the click alone opens the menu when it is let go, not as it goes down.
+  The port draws part of the picture larger (the shader's `view`, `port/present.h` `Zoomed`) and the readout's
+  panels over it at their own size; a game's sources say where to look with `Game::focus` (`runtime/game.h`;
+  `port/zoom.h`). `--zoom SIZE:PLAYER` starts zoomed, for tests and `--present-test`.
+- **Multi game**: the **Picture** of every game in a run (widescreen, 4:3, or as each game is set) and a **Window**
+  beside Full screen, so a run looks the same from game to game. For that run only: each game's own switches are
+  left as they were (`--features` and the games' new `--window` after the launcher's own).
+- **Multi game** on macOS: the next game comes to the front. It opened behind the other windows, since macOS brings
+  forward only a program started by the one in front; the game ending for the next one hands the front to the
+  launcher first (`port/front_macos.mm`), and every game raises its window as it opens.
+- `tools/aiscripts.py sfa2` prints Street Fighter Alpha 2's CPU scripts: the same interpreter as Vampire Savior's,
+  its own instructions named from its code (a second if with else if, the super combo, the Alpha counter, answers
+  picked by where the other's attack reaches), checked against the places the game's interpreter keeps in five runs
+  (games/sfa2/PROGRESS.md, "The computer player: scripts").
+- **Linux ARM64**: a download for 64-bit ARM Linux (aarch64: ARM handhelds, single-board computers, ARM
+  Chromebooks' Linux), `CPS2Recomp-linux-arm64.tar.gz`, beside the x86_64 one, and its launcher updates itself from
+  `update-linux-arm64.txt` (issue #99). CI builds and starts it on an ARM64 runner. (`tools/release/linux.sh` builds
+  for the processor it runs on; `tools/release/all.sh` makes it in an ARM64 build image.)
+- **The Vampire Savior games' CPU plays the tag style and the ring out itself** (Vampire Savior, Definitive, Vampire
+  Savior 2, Vampire Hunter 2): its own scripts, run by its interpreter (`computer.cpp`), have three tactics of the
+  port's, chosen in its own way as the fight calls for them: out of a corner (a throw that sends you behind, a jump over
+  you, a walk out), knocking you over your end (a throw or a sweep), and in the tag style backing off and tagging. It
+  keeps its own guard all the while, which the toolkit's coach (still Alpha 2's and Super Turbo's) cost it by taking
+  its controls. CPU against CPU it won 64-66% of ring outs against the game's own play (the coach: no gain on the same
+  runs). `battle::Description::computerPlaysModes` and `ComputerModeOf`, `ComputerBack`, `ComputerTagWanted`,
+  `ComputerSkill`, `ComputerAsksTag` (`fight/battle.h`). `tools/aiscripts.py` reads a normal's button and strength as
+  the game does (it had them a bit off: the throws are heavy and medium punches).
+- Street Fighter Alpha 3's widescreen is on in the alternative modes' fights too (survival, the endless battle, the
+  ring out, the tag team battle), as in Alpha and Alpha 2; only arcade, versus and training had it (issue #109).
+  Alpha 2's README said its modes were 4:3; they were already wide.
+- **Multi game**: in its endless battle, **N** (or a gamepad's left shoulder) fades out to the next game, and **F** (or
+  the left trigger) held runs the game four times as fast, without sound ("FAST FORWARD x4" at the bottom); each only
+  when the player has not given it to the game. The Multi game page lists them under While it plays, and in Now
+  playing (recomp-common: `MultiButton`). (`port/frontend_sdl.cpp`, `Port::hurry`, `runtime/game.h` `AskNextGame`.)
+- The ring out shows its score (Ring outs: N) at the top all the while it plays, as survival does, not only when it
+  is over.
+- **The Vampire Savior games' computer player is readable C++** (`games/vampire_savior/src/computer.cpp`): the
+  interpreter of its scripts (choosing a plan, a tactic, a reaction; the instructions and the if's tests; each
+  instruction looked at frame by frame until it is over) and fourteen routines the fighters' own code calls in it,
+  about 1,900 instructions of the game's. Each is checked call by call against the game's own code, in Vampire
+  Savior, Definitive, Vampire Savior 2 and Vampire Hunter 2 (the last two's code differs in four places, which their
+  `family.h` names), over the computer's movies, the attract mode's fights and ladders at levels from lowest to
+  highest. Nothing plays differently: it is the ground for a computer that plays the alternative modes itself.
 - **Another game: Street Fighter Alpha 3** (`games/sfa3`; ROM set `sfa3u`, USA 980904, the last revision and the one
   tournaments and Fightcade play; issue #89). The game as the board plays it, translated whole (its 68000 program and
   its sound program, Capcom's driver 1.71) and checked, with everything Street Fighter Alpha 2's port has: a **training

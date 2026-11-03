@@ -59,6 +59,9 @@ public:
     // For tests: the 68000 this many times as fast as the board's, so that the game is never short of time in
     // a frame (runs whose code takes different amounts of time can then be compared picture by picture)
     int cpuSpeed = 1;
+    // Off: the frame's lines are not drawn (the picture keeps what it had). For frames whose picture nobody sees: a
+    // rollback's frames run again, but for the last (port/port.h). Drawing reads the video memory and changes nothing.
+    bool drawing = true;
     static constexpr double kFramesPerSecond = 8000000.0 / 512 / 262;
 
     explicit Machine(const RomSet &roms);
@@ -188,6 +191,9 @@ public:
     void Write16(uint32_t address, uint16_t value) override;
     uint16_t Fetch16(uint32_t address) override;
     void InterruptAck(unsigned level) override;
+    void BeginCheck() override;
+    void CheckWrite(uint32_t address, unsigned size, uint32_t value) override;
+    void EndCheck() override;
     // Z80Bus
     uint8_t Read(uint16_t address) override;
     uint8_t ReadOpcode(uint16_t address) override {
@@ -243,6 +249,7 @@ private:
     uint64_t m_soundInterruptAt = 0; // ... of its next interrupt
     uint64_t m_sampleCount = 0;      // sound samples made
     uint64_t m_sampleAt = 0;         // the Z80's cycle count at which the next is due
+    uint16_t m_checkFactors[2] = {}; // temporary block-check trial state, never game/save state
     // The classic CPS-1's sound side (none on other boards): its chips, the Z80's own memory, the two latches the
     // 68000 writes requests to, and what is left over in turning the 8 MHz of a line into the Z80's 3.579545 MHz
     std::unique_ptr<Cps1Sound> m_classic;

@@ -57,6 +57,9 @@ struct Description {
     // The players' records, and where each stands across (a word, or a long with 16 bits of fraction)
     uint32_t player1 = 0xFF8400, playerSize = 0x400, x = 0x10;
     bool xLong = false;
+    // ... or, for a tag-team game that keeps a side's two characters in records of their own, the record of the side's
+    // character on point now (none: player1 and the one after it)
+    uint32_t (*playerAt)(int n) = nullptr;
     // The button that chooses a character, and whether both Starts are pressed at once on the way to a round (else
     // player 1's until it is in, then player 2's)
     uint16_t choose = kPunch1;
@@ -65,6 +68,9 @@ struct Description {
     // --- the stages ---
     // The stages by name (1 the first), each one's tune (0: none), and the other tunes offered after the stages'
     std::vector<const char *> stageNames;
+    // ... how many of them, the first, the viewer's Infinite goes through (0: all; the rest a game's sources show another
+    // way, which a stage scrolling into the next does not have)
+    int infiniteStages = 0;
     std::vector<uint16_t> stageTunes;
     std::vector<const char *> otherTuneNames;
     std::vector<uint16_t> otherTunes;
@@ -125,6 +131,11 @@ CameraWanted &CameraAt();
 
 // A round of a match is being fought
 bool RoundFought();
+// The window's zoom on a fighter (runtime/game.h, Game::focus; port/zoom.h), for a game's sources: `place` gives where
+// player `player`'s fighter stands in the picture (the middle of its feet, widescreen's columns counted), and the zoom
+// looks `lift` lines above that; a fighter stands about `tall` lines from its feet up. Only while a round is fought, and
+// not in the model viewer, which has sizes of its own.
+void Focus(void (*place)(int player, int &x, int &y), int lift, int tall);
 // Players are choosing their characters, both in
 bool Choosing();
 // The controls of a machine on its way from switching on to a round of a two-player game: credits kept, both Starts

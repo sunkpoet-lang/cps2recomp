@@ -24,13 +24,15 @@ def load(game=None):
             if not line or line.startswith("#") or "=" not in line:
                 continue
             key, value = line.split("=", 1)
-            cfg[key.strip()] = value.strip()
+            key, value = key.strip(), value.strip()
+            # (a key given again adds to it: other_set, a line a set)
+            cfg[key] = cfg[key] + " || " + value if key in cfg else value
     return cfg
 
 
 # What the collection's launcher is told of each game (launcher/src/description.cpp, GameInfo), in its order
 COLLECTION_KEYS = ["id", "name", "rom_set", "rom_parent", "rom_name", "program", "graphics", "sound_program", "samples", "key", "display",
-                   "players", "buttons", "board", "cps_b", "extra_set", "multi",
+                   "players", "buttons", "board", "cps_b", "extra_set", "multi", "other_set", "series", "guests",
                    # (this fork: a Neo Geo game's fix layer, and the system's files and set)
                    "fix", "bios", "bios_set"]
 
@@ -51,8 +53,11 @@ def main():
     if len(args) >= 2 and args[0] == "--collection":
         lines = ["// Generated from games/*/game.cfg by tools/gamecfg.py --collection", "#pragma once", "",
                  "static const GameInfo kGames[] = {"]
-        # (in the order of their names, as the player reads them)
-        for game in sorted(args[2:], key=lambda g: load(g).get("name", g)):
+        # (in the order of their names, as the player reads them; a series' games together, where its name is)
+        def order(g):
+            cfg = load(g)
+            return (cfg.get("series") or cfg.get("name", g), cfg.get("name", g))
+        for game in sorted(args[2:], key=order):
             cfg = load(game)
             cfg.setdefault("id", game)
             lines.append("    {" + ", ".join(quoted(cfg.get(key, "")) for key in COLLECTION_KEYS) + "},")
@@ -64,6 +69,15 @@ def main():
         lines = ["// Generated from game.cfg by cps2recomp/tools/gamecfg.py", "#pragma once", ""]
         for key, value in cfg.items():
             lines.append('#define GAME_%s "%s"' % (key.upper(), value.replace("\\", "\\\\").replace('"', '\\"')))
+        # (the games whose boards it runs beside its own, runtime/guest.h: each one's set as its own game.cfg has it)
+        if cfg.get("guests"):
+            entries = []
+            for guest in cfg["guests"].split():
+                g = load(guest)
+                entries.append("{" + ", ".join(quoted(v) for v in (guest, g.get("rom_name", g.get("name", guest)), g.get("rom_set", ""),
+                                                                    g.get("program", ""), g.get("graphics", ""), g.get("sound_program", ""),
+                                                                    g.get("samples", ""), g.get("key", ""))) + "}")
+            lines.append("#define GAME_GUEST_TABLE {" + ", ".join(entries) + "}")
         content = "\n".join(lines) + "\n"
         if not os.path.exists(args[1]) or open(args[1]).read() != content:
             os.makedirs(os.path.dirname(args[1]) or ".", exist_ok=True)

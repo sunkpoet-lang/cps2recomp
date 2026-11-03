@@ -22,6 +22,7 @@ namespace cps2recomp {
 
 namespace {
     battle::Description d; // the game's (battle::Register)
+    bool g_described = false;
 
     constexpr const char *kModes = "Alternative modes", *kSurvival = "Survival", *kEndless = "Endless battle";
     constexpr const char *kRingOut = "Ring out", *kTeam = "Tag team battle";
@@ -88,7 +89,7 @@ namespace {
     constexpr uint16_t kAnyButton = kLeft | kRight | kUp | kDown | kPunch1 | kPunch2 | kPunch3 | kKick1 | kKick2 | kKick3;
 
     uint32_t Player(int n) {
-        return d.player1 + static_cast<uint32_t>(n) * d.playerSize;
+        return d.playerAt ? d.playerAt(n) : d.player1 + static_cast<uint32_t>(n) * d.playerSize;
     }
     int CameraX() {
         return static_cast<int16_t>(Ram16(d.cameraXAt ? d.cameraXAt() : d.cameraX));
@@ -126,7 +127,9 @@ namespace {
     void SetComputer(int n, bool computer) {
         const uint8_t value = static_cast<uint8_t>(computer != d.computerIsZero ? 1 : 0);
         SetRam8(Player(n) + d.computer, value);
-        if (d.partner) {
+        if (d.partnerAt) {
+            SetRam8(d.partnerAt(n) + d.computer, value);
+        } else if (d.partner) {
             SetRam8(Player(n) + d.partner + d.computer, value);
         }
     }
@@ -244,6 +247,7 @@ namespace {
         bool planAir[2] = {false, false};
         int32_t planWay[2] = {0, 0}; // (a throw's: 1 the stick towards the other, -1 away)
         int32_t lastFree[2] = {0, 0}; // (a ring out's: how far from its end each was when last its own master)
+        int32_t tagAsked[2] = {0, 0}; // (a game whose computer plays the modes itself: frames its ask for a tag holds)
     } g;
     Spare g_dropBack;                    // the ring out: the machine of the next match's stage
     bool g_open = false;                 // the ring out: the port's machine is running a fight with open ends
@@ -265,7 +269,15 @@ namespace {
     // number of its own
     bool ToRound(Machine &machine, int32_t &frames) {
         if (frames == 0 && !g_atChoice.empty() && d.random) {
-            SetRam16(d.random, static_cast<uint16_t>(Random()));
+            if (d.randomNext) {
+                uint16_t random = Ram16(d.random);
+                for (uint32_t steps = Random() & 0xFFFF; steps; steps--) {
+                    random = d.randomNext(random);
+                }
+                SetRam16(d.random, random);
+            } else {
+                SetRam16(d.random, static_cast<uint16_t>(Random()));
+            }
         }
         if (g_atChoice.empty() && d.choosing()) {
             Archive ar(g_atChoice, true);
@@ -807,7 +819,7 @@ namespace {
     void RingOutCoach(uint16_t &one, uint16_t &two) {
         uint16_t *panels[2] = {&one, &two};
         for (int side = 0; side < 2; side++) {
-            if (!Coached(side)) {
+            if (!Coached(side) || d.computerPlaysModes) {
                 continue;
             }
             if (g.plan[side] == kPlay) {
@@ -858,6 +870,9 @@ namespace {
             if (g.cool[side] > 0) {
                 g.cool[side]--;
             }
+            if (g.tagAsked[side] > 0) {
+                g.tagAsked[side]--;
+            }
             const int toward = Toward(side);
             switch (g.move[side]) {
             case kStill: {
@@ -866,7 +881,8 @@ namespace {
                 if (next < 0 || g.putBack[side]) {
                     break;
                 }
-                const bool computerTags = Coached(side) && !emptied && g.cool[side] == 0 && d.canTag(side) && ComputerTags(side);
+                const bool asked = d.computerPlaysModes ? g.tagAsked[side] > 0 : ComputerTags(side);
+                const bool computerTags = Coached(side) && !emptied && g.cool[side] == 0 && d.canTag(side) && asked;
                 if (computerTags && Log()) {
                     const int full = std::max<int>(g.full, 1);
                     fprintf(Log(), "tag %d side=%d health=%d partner=%d other_down=%d distance=%d\n", g.clock, side,
@@ -1792,9 +1808,10 @@ namespace {
         if (g.tourStages && g.phase != Phase::Starting) {
             TourEnd(machine);
         }
-        if (g.kind == Kind::Survival && g.phase != Phase::Starting && g.phase != Phase::Over) {
+        // The score so far, all the while (the ring out's through the fall and the drop to the next stage too)
+        if ((g.kind == Kind::Survival || g.kind == Kind::RingOut) && g.phase != Phase::Starting && g.phase != Phase::Over) {
             char text[32];
-            snprintf(text, sizeof(text), "Beaten: %d", g.score);
+            snprintf(text, sizeof(text), g.kind == Kind::RingOut ? "Ring outs: %d" : "Beaten: %d", g.score);
             lines.push_back({0.5f, 0.21f, 0, text});
         }
         if (g.kind == Kind::Team && g.tag && g.phase == Phase::Fighting) {
@@ -1861,6 +1878,10 @@ void BattleBeforeFrame(Machine &machine) {
         g.stage = g.back = g.tourOrder[0];
         g.backCamera = LeftEnd();
         g_backSound.Start();
+    }
+    // The player asked for the next game: the fade-out the last stage ends with, from here
+    if (g_tour.on && NextGameAsked() >= 0 && g.tourStages && g.phase != Phase::Starting && !g.tourOut) {
+        g.tourOut = 1;
     }
     if (g.kind != Kind::None) {
         BeforeFrame(machine);
@@ -1936,6 +1957,61 @@ bool RingOutMayWalkBack(uint32_t player) {
     return !Part(8) || Back(side) >= Between(100, 200);
 }
 
+namespace {
+    int SideOf(uint32_t player) {
+        return player == Player(0) ? 0 : player == Player(1) ? 1 : -1;
+    }
+} // namespace
+
+ComputerMode ComputerModeOf(uint32_t player) {
+    const int side = SideOf(player);
+    if (side < 0 || !d.computerPlaysModes || g.phase != Phase::Fighting || !Coached(side)) {
+        return ComputerMode::kNone;
+    }
+    if (g.kind == Kind::RingOut) {
+        return ComputerMode::kRingOut;
+    }
+    if (g.kind == Kind::Team && g.tag && g.move[side] == kStill) {
+        return ComputerMode::kTag;
+    }
+    return ComputerMode::kNone;
+}
+
+int ComputerBack(uint32_t player, bool other) {
+    const int side = SideOf(player);
+    return side < 0 || g.kind != Kind::RingOut ? 0 : Back(other ? 1 - side : side);
+}
+
+// The tag style's want (ComputerTags' first part): the one on low and a partner with more, or a partner who has rested
+// with much more; not soon after the last tag, nor just out of a hit
+bool ComputerTagWanted(uint32_t player) {
+    const int side = SideOf(player);
+    if (ComputerModeOf(player) != ComputerMode::kTag || g.cool[side] > 0 || g.free[side] < kOutOfHit) {
+        return false;
+    }
+    const int next = Healthiest(side);
+    const int full = std::max<int>(g.full, 1);
+    const int on = std::max<int>(static_cast<int16_t>(Ram16(Player(side) + d.health)), 0) * 1000 / full;
+    const int partner = next >= 0 ? g.kept[side][next] * 1000 / full : 0;
+    const bool low = on < Between(250, 400) && partner >= on + 150;
+    const bool rested = partner >= on + 450 && g.sinceTag[side] > Between(1800, 1200);
+    return next >= 0 && g.sinceTag[side] >= Between(720, 360) && (low || rested);
+}
+
+int ComputerSkill() {
+    return Skill();
+}
+
+void ComputerAsksTag(uint32_t player) {
+    const int side = SideOf(player);
+    if (side >= 0 && ComputerModeOf(player) == ComputerMode::kTag) {
+        g.tagAsked[side] = 20;
+        if (Log()) {
+            fprintf(Log(), "asked to tag %d side=%d\n", g.clock, side);
+        }
+    }
+}
+
 // In a ring out fight a player that is not its own master (reeling from a hit, guarding one, thrown) is not
 // kept in at a side where the picture is at the stage's end: it goes over the end (the game's sources ask where the
 // game keeps the players in).
@@ -1951,8 +2027,17 @@ bool RingOutLetsOut(uint32_t player) {
     return left || right;
 }
 
+int battle::RoundResultNow() {
+    return !g_described ? -1 : d.resultNow ? d.resultNow() : Ram8(d.result);
+}
+
+int battle::RoundsToWin() {
+    return d.roundsToWin;
+}
+
 void battle::Register(const Description &description) {
     d = description;
+    g_described = true;
     Game &game = TheGame();
     game.pages.push_back({kSurvival, kModes, "One opponent after another on the health you have left. How many can you beat?"});
     game.pages.push_back({kEndless, kModes, "Two fighters the game plays, for as long as you like. Touch the controls to take one over."});
@@ -1975,7 +2060,8 @@ void battle::Register(const Description &description) {
     game.pages.push_back({kRingOut, kModes, "No health: knock your opponent over the end of the stage, and jump down to the next."});
     game.commands.push_back({"ringout_start", kRingOut, "Start",
                              "Choose a character. Nobody loses health: the ends of a stage are open, and a fighter knocked over "
-                             "one falls. Knock your opponent out and you jump down to the next stage; over when you fall.",
+                             "one falls. Knock your opponent out and you jump down to the next stage; over when you fall. The ring outs so "
+                             "far are shown at the top.",
                              StartRingOut});
     {
         static std::vector<std::string> numbers;

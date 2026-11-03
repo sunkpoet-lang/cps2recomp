@@ -18,8 +18,12 @@ These aren't negotiable; pull requests that break them are closed.
    where ROM sets or keys can be found.
 3. **Nothing from leaked material**: no leaked source, and no names taken from it.
 4. **No emulator's code**, beyond what `THIRD_PARTY_NOTICES.md` lists (MAME's implementation of the
-   program cipher). Reading an emulator to learn how the hardware behaves is fine; copying its code
-   in is not.
+   program cipher) and these named exceptions: [ymfm](https://github.com/aaronsgiles/ymfm) (Aaron
+   Giles, BSD-3-Clause) for the Yamaha FM chips, such as the CPS-1's YM2151, whose data sheets leave
+   out too much to write them again. Such a library goes in `third_party/` as its project publishes it,
+   with its notice in `THIRD_PARTY_NOTICES.md`, and its state goes in the save state like the rest of
+   the machine. Reading an emulator to learn how the hardware behaves is fine; copying its code in is
+   not.
 5. **Only add code you have the right to contribute**, under the GPL-3.0. Code from other projects
    must have a compatible license and be credited in `THIRD_PARTY_NOTICES.md`.
 
@@ -46,6 +50,8 @@ which only someone with their ROM sets can run (`rom/<id>/`):
 
 - `make GAME=<id> check FRAMES=40000 MOVIE=games/<id>/movies/ladder.txt`: the interpreter and the translated
   code must give the same state after every frame, and two runs must be alike;
+- `make GAME=<id> check-rollback` and `check-online`: what online play needs of every game, a new one above all
+  (everything its sources keep between frames in its save state: [docs/TOOLKIT.md](docs/TOOLKIT.md), Online play).
 - `make GAME=<id> check-rewrites`: every hand-written routine of the game against the code it replaces;
   `check-blocks`: every translated block beside the interpreter; `check-sound`: the sound driver against the
   game's sound program;

@@ -10,7 +10,7 @@ players hold as its standard) with the three characters only [Vampire Savior 2](
 Savior's fifteen stay, so all eighteen are there, and every one plays by Vampire Savior's rules, as if the three
 had always been in it. It has everything the [Vampire Savior port](../vampire_savior/README.md) has: the training
 mode and the dummy, widescreen, the modes (the team battle, tag style or knock-out, 2 vs 2 for four players, among them), custom colours,
-the board's settings and the rest.
+the board's settings, the zoom on a fighter or both (the left stick's click and a shoulder or the right stick's click, the d-pad to frame it) and the rest.
 
 > **Beta.** The three play, and what they do is checked against Vampire Savior 2 (every animation picture for
 > picture in the model viewer, every rewritten routine of the game against its own code), but nobody has played
@@ -56,16 +56,28 @@ everyone.
 
 Not yet: Donovan's stage and Vampire Savior 2's music (Vampire Savior's twelve stages are all here).
 
+## Other games' stages
+
+With *Darkstalkers: The Night Warriors*' ROM set (`dstlk`) as well, the first game's twelve stages are here too, and
+with *Street Fighter Alpha 2*'s (`sfa2u`) its eighteen, each with its own music, as those games show them. The
+**Darkstalkers' stages** option (Display) puts each match on the opponent's stage in Darkstalkers, where it has one:
+twelve of the eighteen characters have (not Lilith, Q-Bee, B.B. Hood, Jedah, Lei-Lei or Donovan, who keep Vampire
+Savior's). Training's stage and the stage viewer have all of them by name. Each game's board runs unseen beside this
+one, on that stage, with its camera where this game's is, and the fighters and the panel are drawn over its picture.
+Nothing of the game's play changes, so online each player sees the stages they chose.
+
 ## What you need
 
 - Both ROM sets: `vsavj` (*Vampire Savior: The Lord of Vampire*, Japan 970519) and `vsav2` (*Vampire Savior 2: The
   Lord of Vampire*, Japan 970913), each as a zip or a folder of its files, with its key file. In the launcher,
   choose `vsavj` on this game's page and `vsav2` on Vampire Savior 2's: this game takes it from there.
+- For other games' stages (not needed to play): `dstlk` (*Darkstalkers: The Night Warriors*, Europe 940705) and
+  `sfa2u` (*Street Fighter Alpha 2*, USA 960430), each chosen on its own game's page.
 - One of: macOS 13 or later (Apple silicon or Intel); Linux x86_64 or SteamOS; Windows 10 or 11, 64-bit.
 
 ## Playing
 
-Vampire Savior Definitive comes with [CPS-2 Recomp](../../README.md#playing). From a terminal, `vsav_definitive
+Vampire Savior Definitive comes with [CPS-2 Recomp](../../README.md#getting-started). From a terminal, `vsav_definitive
 --rom <vsavj> --rom2 <vsav2>` starts it straight away (without `--rom2`, `vsav2` is looked for beside `vsavj`).
 
 ## How it works

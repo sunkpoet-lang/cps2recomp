@@ -6,22 +6,31 @@
 
 #include "bindings.h"
 #include "port.h"
+#include "png_write.h"
 #include "present.h"
+#include "touch.h"
 
 #include "../recomp-common/text.h"
 #include "../runtime/game.h"
+#include "../recomp-common/gamepads.h"
 #include "online.h"
 
 #include <SDL3/SDL.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 
 using namespace cps2recomp;
 
 namespace port {
+
+#ifdef __APPLE__
+void HandFrontToLauncher(); // (front_macos.mm)
+#endif
 
 namespace {
 
@@ -58,10 +67,36 @@ namespace {
         return PadInputBound(g_bindings, Table(), {button, -1});
     }
 
+    // The camera's zoom (zoom.h) is the left stick's click held and a shoulder pressed: left for player 1, right for
+    // player 2, the right stick's click for both fighters at once; the d-pad (or the stick) moves the camera. While the
+    // click is held (and is not the game's), the shoulders and the directions are not the game's. On the keyboard,
+    // Left Shift held, Q, E and W, and the arrows.
+    bool ZoomHeld(SDL_Gamepad *gp) {
+        return Zoom::Possible() && gp && !ButtonBound(SDL_GAMEPAD_BUTTON_LEFT_STICK) && SDL_GetGamepadButton(gp, SDL_GAMEPAD_BUTTON_LEFT_STICK);
+    }
+    bool Shoulder(int button) {
+        return button == SDL_GAMEPAD_BUTTON_LEFT_SHOULDER || button == SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER;
+    }
+    bool DPad(int button) {
+        return button == SDL_GAMEPAD_BUTTON_DPAD_UP || button == SDL_GAMEPAD_BUTTON_DPAD_DOWN || button == SDL_GAMEPAD_BUTTON_DPAD_LEFT ||
+               button == SDL_GAMEPAD_BUTTON_DPAD_RIGHT;
+    }
+    bool KeyZoomHeld(const bool *keys) {
+        return Zoom::Possible() && keys[SDL_SCANCODE_LSHIFT] && !KeyBound(SDL_SCANCODE_LSHIFT);
+    }
+    bool KeyZoom(SDL_Scancode key) {
+        return key == SDL_SCANCODE_Q || key == SDL_SCANCODE_E || key == SDL_SCANCODE_W || key == SDL_SCANCODE_UP || key == SDL_SCANCODE_DOWN ||
+               key == SDL_SCANCODE_LEFT || key == SDL_SCANCODE_RIGHT;
+    }
+
     uint16_t ReadKeyboard(const bool *keys, int player) {
         uint16_t pad = 0;
+        const bool zoomHeld = KeyZoomHeld(keys);
         for (int action = 0; action < Table().table.count; action++) {
             const SDL_Scancode key = g_bindings.key[player][action];
+            if (zoomHeld && KeyZoom(key)) {
+                continue;
+            }
             if (key != SDL_SCANCODE_UNKNOWN && keys[key]) {
                 pad |= Table().bits[action];
             }
@@ -75,20 +110,64 @@ namespace {
 
     uint16_t ReadGamepad(SDL_Gamepad *gp, int player) {
         uint16_t pad = 0;
+        const bool zoomHeld = ZoomHeld(gp);
         for (int action = 0; action < Table().table.count; action++) {
             const PadInput input = g_bindings.pad[player][action];
+            if (zoomHeld && (Shoulder(input.button) || DPad(input.button))) {
+                continue;
+            }
             if ((input.button >= 0 && SDL_GetGamepadButton(gp, static_cast<SDL_GamepadButton>(input.button))) ||
                 (input.axis >= 0 && SDL_GetGamepadAxis(gp, static_cast<SDL_GamepadAxis>(input.axis)) > kDead)) {
                 pad |= Table().bits[action];
             }
         }
-        const int x = SDL_GetGamepadAxis(gp, SDL_GAMEPAD_AXIS_LEFTX);
-        const int y = SDL_GetGamepadAxis(gp, SDL_GAMEPAD_AXIS_LEFTY);
+        const int x = zoomHeld ? 0 : SDL_GetGamepadAxis(gp, SDL_GAMEPAD_AXIS_LEFTX);
+        const int y = zoomHeld ? 0 : SDL_GetGamepadAxis(gp, SDL_GAMEPAD_AXIS_LEFTY);
         if (x < -kDead) pad |= kLeft;
         if (x > kDead) pad |= kRight;
         if (y < -kDead) pad |= kUp;
         if (y > kDead) pad |= kDown;
         return pad;
+    }
+
+    // A Multi game run's window: where the game before left it (each game is a program of its own, and its window
+    // would open where the system puts a new one). The game ending for the next writes it down; the next game reads
+    // it, if it was written moments ago (not a run before), and opens its window there, as tall.
+    struct Placement {
+        int x = 0, y = 0, height = 0;
+        bool maximized = false;
+    };
+    std::filesystem::path PlacementFile() {
+        std::error_code error;
+        const std::filesystem::path folder = std::filesystem::temp_directory_path(error);
+        return error ? std::filesystem::path() : folder / "cps2recomp-multi-window.txt";
+    }
+    void KeepPlacement(SDL_Window *window) {
+        const std::filesystem::path file = PlacementFile();
+        if (file.empty() || (SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN)) {
+            return;
+        }
+        Placement at;
+        int width = 0;
+        SDL_GetWindowPosition(window, &at.x, &at.y);
+        SDL_GetWindowSize(window, &width, &at.height);
+        at.maximized = SDL_GetWindowFlags(window) & SDL_WINDOW_MAXIMIZED;
+        std::ofstream(file) << at.x << ' ' << at.y << ' ' << at.height << ' ' << at.maximized << '\n';
+    }
+    bool TakePlacement(Placement &at) {
+        const std::filesystem::path file = PlacementFile();
+        std::error_code error;
+        if (file.empty() || !std::filesystem::exists(file, error)) {
+            return false;
+        }
+        const auto age = std::filesystem::file_time_type::clock::now() - std::filesystem::last_write_time(file, error);
+        bool fresh = !error && age < std::chrono::minutes(1);
+        {
+            std::ifstream in(file);
+            fresh = fresh && (in >> at.x >> at.y >> at.height >> at.maximized) && at.height > 0;
+        }
+        std::filesystem::remove(file, error);
+        return fresh;
     }
 
     // The menu bar's own entries (the in-game menu's have ids of their own: recomp::IsMenuEntry)
@@ -225,6 +304,18 @@ void BarPicture(const recomp::MenuBar &bar, int width, int height, std::vector<u
     for (const recomp::MenuBar::Box &box : bar.Boxes()) {
         regions.push_back({static_cast<int>(box.x), static_cast<int>(box.y), static_cast<int>(std::ceil(box.w)), static_cast<int>(std::ceil(box.h))});
     }
+    // (the presenter's overlay is drawn blended over the whole window: outside the regions nothing, each pixel inside
+    // whole, so the bar is drawn as it is and the picture shows everywhere else)
+    std::vector<uint32_t> drawn(pixels.size(), 0);
+    for (const SDL_Rect &r : regions) {
+        for (int y = std::max(r.y, 0); y < std::min(r.y + r.h, height); y++) {
+            for (int x = std::max(r.x, 0); x < std::min(r.x + r.w, width); x++) {
+                const size_t at = static_cast<size_t>(y) * width + x;
+                drawn[at] = pixels[at] | 0xFF000000u;
+            }
+        }
+    }
+    pixels.swap(drawn);
 }
 
 int RunWindowed(Port &port) {
@@ -235,6 +326,14 @@ int RunWindowed(Port &port) {
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMEPAD)) {
         fprintf(stderr, "SDL_Init: %s\n", SDL_GetError());
         return 1;
+    }
+    // (controllers SDL doesn't know, issue #213: gamecontrollerdb.txt beside the program, in the launcher's folder or in
+    // the game's own; recomp-common/gamepads.h)
+    {
+        const char *base = SDL_GetBasePath();
+        const std::string mine = port.PlayerFolder();
+        recomp::AddGamepadMappings({base ? std::filesystem::u8path(base) : std::filesystem::path(), LauncherFolder(),
+                                    mine.empty() ? std::filesystem::path() : std::filesystem::u8path(mine)});
     }
     // (the window: so many times the board's 224 lines, --scale's or the Display page's)
     const int scale = port.opt.scale > 0 ? port.opt.scale : WindowSize();
@@ -248,26 +347,139 @@ int RunWindowed(Port &port) {
     // much wider as the widest picture the game's sources may ask for; 4:3 for a picture that fills it)
     const int columns = TheGame().widestPicture ? std::clamp(TheGame().widestPicture(), +Video::kWidth, +Video::kMaxWidth) : Video::kWidth;
     auto windowShape = [](int across) { return PictureShape(across, Video::kHeight, DisplayShape(), 4.0f / 3.0f * across / Video::kWidth); };
-    // (and above the picture the menu bar's strip, as many times its dots: none full screen)
+    // (in a Multi game run, a window where the game before's was: a full screen one is full screen as asked)
+    Placement placed;
+    const bool carried = !MultiGame().empty() && TakePlacement(placed) && !port.opt.fullscreen;
+    // (this fork: and above the picture the menu bar's strip, as many times its dots: none full screen)
     const int strip = port.opt.fullscreen ? 0 : recomp::MenuBar::kHeightDots * scale;
-    SDL_Window *window = SDL_CreateWindow(title, static_cast<int>(std::lround(Video::kHeight * scale * windowShape(columns))), Video::kHeight * scale + strip,
-                                          SDL_WINDOW_RESIZABLE | (port.opt.fullscreen ? SDL_WINDOW_FULLSCREEN : 0) |
-                                              (getenv("CPS2RECOMP_HIDDEN_WINDOW") ? SDL_WINDOW_HIDDEN : 0)); // (hidden: for tests)
+    const int windowHeight = carried ? placed.height : Video::kHeight * scale + strip;
+    // The window, as an OpenGL window for a shader (shading.h: nothing else draws to it), `at` a place for it (`width`
+    // 0: as wide as the picture's shape makes it)
+    auto makeWindow = [&](bool opengl, const Placement *at, int width, int height, bool fullscreen) {
+        const SDL_PropertiesID properties = SDL_CreateProperties();
+        SDL_SetStringProperty(properties, SDL_PROP_WINDOW_CREATE_TITLE_STRING, title);
+        SDL_SetNumberProperty(properties, SDL_PROP_WINDOW_CREATE_WIDTH_NUMBER, width > 0 ? width : std::lround(height * windowShape(columns)));
+        SDL_SetNumberProperty(properties, SDL_PROP_WINDOW_CREATE_HEIGHT_NUMBER, height);
+        if (at) {
+            SDL_SetNumberProperty(properties, SDL_PROP_WINDOW_CREATE_X_NUMBER, at->x);
+            SDL_SetNumberProperty(properties, SDL_PROP_WINDOW_CREATE_Y_NUMBER, at->y);
+        }
+#ifdef __ANDROID__
+        fullscreen = true; // (a phone's whole screen, its bars hidden)
+#endif
+        SDL_SetNumberProperty(properties, SDL_PROP_WINDOW_CREATE_FLAGS_NUMBER,
+                              SDL_WINDOW_RESIZABLE | (fullscreen ? SDL_WINDOW_FULLSCREEN : 0) | (at && at->maximized ? SDL_WINDOW_MAXIMIZED : 0) |
+                                  (opengl ? SDL_WINDOW_OPENGL : 0) | (getenv("CPS2RECOMP_HIDDEN_WINDOW") ? SDL_WINDOW_HIDDEN : 0)); // (hidden: for tests)
+        SDL_Window *made = SDL_CreateWindowWithProperties(properties);
+        SDL_DestroyProperties(properties);
+        // (in front: on macOS a program started by one that is not, as the launcher is behind a Multi game run's
+        // last game, opens behind the other windows)
+        if (made && !getenv("CPS2RECOMP_HIDDEN_WINDOW")) {
+            SDL_RaiseWindow(made);
+        }
+        return made;
+    };
     // The picture goes to the window through SDL's GPU API, or through SDL's renderer where there is no
-    // device for that (and the dummy video driver of the tests has none) or when asked: --renderer sdl
+    // device for that (and the dummy video driver of the tests has none) or when asked: --renderer sdl. With a
+    // shader preset chosen (the Display page's Shader, or --shader) it goes through the preset with OpenGL instead,
+    // where librashader is beside the game and makes the preset; else as without one.
     Presenter presenter;
     std::string presentError;
     const bool wantGpu = port.opt.renderer != "sdl" && strcmp(SDL_GetCurrentVideoDriver(), "dummy") != 0;
-    if (!window || !presenter.Open(window, wantGpu, presentError)) {
+    const bool canShade = strcmp(SDL_GetCurrentVideoDriver(), "dummy") != 0;
+    std::string preset = canShade ? port.ShaderPreset() : "";
+    int shaderValue = FeatureValue("display_shader");
+    std::string shaderError;
+    if (!preset.empty() && !Shading::Available(shaderError)) {
+        fprintf(stderr, "shader: %s; the picture is drawn without it\n", shaderError.c_str());
+        preset.clear();
+    }
+    SDL_Window *window = makeWindow(!preset.empty(), carried ? &placed : nullptr, 0, windowHeight, port.opt.fullscreen);
+    // (opened as the preset says, or as without one when that fails)
+    auto openPresenter = [&]() {
+        if (!preset.empty()) {
+            if (presenter.OpenShaded(window, preset, shaderError)) {
+                return true;
+            }
+            fprintf(stderr, "shader %s: %s; the picture is drawn without it\n", preset.c_str(), shaderError.c_str());
+            preset.clear();
+            // (an OpenGL window is drawn to by nothing else: one that is not, where this one is)
+            Placement at;
+            int width = 0;
+            SDL_GetWindowPosition(window, &at.x, &at.y);
+            SDL_GetWindowSize(window, &width, &at.height);
+            at.maximized = SDL_GetWindowFlags(window) & SDL_WINDOW_MAXIMIZED;
+            const bool fullscreen = SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN;
+            SDL_DestroyWindow(window);
+            window = makeWindow(false, &at, width, at.height, fullscreen);
+            if (!window) {
+                presentError = SDL_GetError();
+                return false;
+            }
+        }
+        return presenter.Open(window, wantGpu, presentError);
+    };
+    presenter.SetVsync(FeatureOn("display_vsync")); // (kept when it is opened again)
+    if (!window || !openPresenter()) {
         fprintf(stderr, "SDL window: %s\n", window ? presentError.c_str() : SDL_GetError());
         return 1;
     }
-    if (wantGpu && !presenter.UsesGpu()) {
+    if (wantGpu && !presenter.UsesGpu() && !presenter.Shaded()) {
         fprintf(stderr, "no GPU device (%s): the picture goes through SDL's renderer\n", presentError.c_str());
     }
-    if (port.opt.stats) {
-        fprintf(stderr, "picture: %s\n", presenter.UsesGpu() ? SDL_GetGPUDeviceDriver(presenter.Device()) : SDL_GetRendererName(presenter.Renderer()));
-    }
+    auto sayPresenter = [&]() {
+        if (presenter.Shaded() && getenv("CPS2RECOMP_SHADER_SHOT")) {
+            presenter.Shader()->keepLast = true;
+        }
+        if (port.opt.stats) {
+            fprintf(stderr, "picture: %s\n", presenter.Shaded()  ? ("OpenGL, shader " + preset).c_str()
+                                             : presenter.UsesGpu() ? SDL_GetGPUDeviceDriver(presenter.Device())
+                                                                   : SDL_GetRendererName(presenter.Renderer()));
+        }
+    };
+    sayPresenter();
+    // The Display page's Shader changed in the menu: another preset in the same window, or the window made again
+    // for or without OpenGL, where it is and as large
+    auto followShader = [&]() {
+        const int value = FeatureValue("display_shader");
+        if (value == shaderValue || !port.opt.shader.empty() || !canShade) {
+            return;
+        }
+        shaderValue = value;
+        std::string next = port.ShaderPreset();
+        if (!next.empty() && !Shading::Available(shaderError)) {
+            fprintf(stderr, "shader: %s; the picture is drawn without it\n", shaderError.c_str());
+            next.clear();
+        }
+        if (next == preset) {
+            return;
+        }
+        if (!next.empty() && presenter.Shaded()) {
+            if (presenter.SetPreset(next, shaderError)) {
+                preset = next;
+                sayPresenter();
+            } else {
+                fprintf(stderr, "shader %s: %s; the one before is kept\n", next.c_str(), shaderError.c_str());
+            }
+            return;
+        }
+        Placement at;
+        int width = 0;
+        SDL_GetWindowPosition(window, &at.x, &at.y);
+        SDL_GetWindowSize(window, &width, &at.height);
+        at.maximized = SDL_GetWindowFlags(window) & SDL_WINDOW_MAXIMIZED;
+        const bool fullscreen = SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN;
+        presenter.Close();
+        SDL_DestroyWindow(window);
+        preset = next;
+        window = makeWindow(!preset.empty(), &at, width, at.height, fullscreen);
+        if (!window || !openPresenter()) {
+            fprintf(stderr, "SDL window: %s\n", window ? presentError.c_str() : SDL_GetError());
+            port.quit = true;
+            return;
+        }
+        sayPresenter();
+    };
 
     // Sound: how much is kept waiting to be played (seconds), and how much is too much. The device is asked
     // for small buffers, so that little waits there either. (CPS2RECOMP_AUDIO_LOG: what is waiting, printed
@@ -312,7 +524,20 @@ int RunWindowed(Port &port) {
     unsigned previousMenu = 0;
     int triggerHeld = 0;
     bool bothHeld = false; // a gamepad's Start and Select (Back) together: the menu
+    // (with a zoom to work, the left stick's click opens the menu when it is let go, unless a shoulder was pressed
+    // while it was held: then it was the zoom's)
+    bool stickWaiting = false;
     auto toggleMenu = [&]() {
+        if (port.net) {
+            // (online: no menu, the game goes on for both players; Esc gives up a wait, and in a match asks whether to
+            // leave it: Port::leaving)
+            if (port.connecting && !port.net->Arcade()) {
+                port.LeaveOnline();
+            } else {
+                port.leaving = !port.leaving;
+            }
+            return;
+        }
         if (port.menu.IsOpen()) {
             port.menu.Close();
         } else {
@@ -321,9 +546,32 @@ int RunWindowed(Port &port) {
             menuDirty = true;
         }
     };
+    // Online, the chat (Port::typing): T on the keyboard, the right stick's click or the touch screen's Chat button
+    // opens a line to type, and the system's text input with it (on a Steam Deck or a phone, its own on-screen
+    // keyboard); Enter sends it, Esc (or the click again) puts it away. Meanwhile the keyboard is the chat's, and after
+    // it, not the game's until every key is let go (the Enter that sent it is not the game's Start).
+    uint64_t openedByT = 0; // (when T opened it: its own letter, if the system sends it as text too, is not the line's)
+    bool keysAfterChat = false;
+    auto chatOpen = [&](bool open) {
+        if (open == port.typing || (open && (!port.net || port.connecting || port.leaving))) {
+            return;
+        }
+        port.typing = open;
+        port.typed.clear();
+        if (open) {
+            int w = 0, h = 0;
+            SDL_GetWindowSize(window, &w, &h);
+            const SDL_Rect area{0, h * 3 / 4, w / 2, h / 12};
+            SDL_SetTextInputArea(window, &area, 0);
+            SDL_StartTextInput(window);
+        } else {
+            SDL_StopTextInput(window);
+            keysAfterChat = true;
+        }
+    };
     auto quickState = [&](bool save) {
-        if (port.online) {
-            return; // (no save states online)
+        if (port.net || port.gekkoOnline) {
+            return; // (online: no save states)
         }
         std::string error;
         const std::string path = port.StatePath(port.menu.Slot());
@@ -331,6 +579,14 @@ int RunWindowed(Port &port) {
             fprintf(stderr, "state %d: %s\n", port.menu.Slot(), error.c_str());
         }
     };
+    // A Multi game run (the launcher's Multi game page): N or a gamepad's left shoulder for the next game, F or
+    // the left trigger held to fast-forward (each when the player has not given it to the game)
+    const bool multi = !MultiGame().empty();
+    // (a touch screen's controls: touch.h)
+    TouchControls touch;
+    std::vector<uint32_t> touchPicture;
+    // (the menu's Zoom row, as last seen: a change there is the camera's, and a zoom's press is the row's)
+    int zoomRow = port.zoom.Choice();
     // The menu bar above the picture, and the same menus where the picture is right-clicked (port.h's Bar...).
     // While one of its menus is open the game stands still, as with the in-game menu; a click or a key that
     // works the bar does not reach the game.
@@ -453,20 +709,20 @@ int RunWindowed(Port &port) {
 
     // Online (online.h): the session runs the frames, with this side's controls as its player's
     Online online;
-    const bool isOnline = port.opt.online.mode != OnlineOptions::Mode::Off;
+    const bool isOnline = port.opt.gekko.mode != OnlineOptions::Mode::Off;
     if (isOnline) {
         std::string error;
-        if (!online.Start(port, port.opt.online, error)) {
+        if (!online.Start(port, port.opt.gekko, error)) {
             fprintf(stderr, "online: %s\n", error.c_str());
             SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, title, ("Online: " + error).c_str(), window);
             return 1;
         }
-        const OnlineOptions::Mode mode = port.opt.online.mode;
+        const OnlineOptions::Mode mode = port.opt.gekko.mode;
         const char *who = mode == OnlineOptions::Mode::Host ? "player 1" : mode == OnlineOptions::Mode::Join ? "player 2" : "stress test";
         SDL_SetWindowTitle(window, (std::string(title) + " - online, " + who).c_str());
     }
     // (online, a frame's time is a touch longer while this side is ahead of the other's)
-    auto pace = [&]() {
+    auto paceFrame = [&]() {
         nextFrame += static_cast<uint64_t>(kFrameNs * (isOnline && online.FramesAhead() > 1.0f ? 1.016 : 1.0));
         const uint64_t now = SDL_GetTicksNS();
         if (nextFrame > now) {
@@ -533,7 +789,37 @@ int RunWindowed(Port &port) {
         }
         loops++;
         SDL_Event ev;
+        if (port.typing && (!port.net || port.connecting)) {
+            chatOpen(false); // (the match over, or waited for again)
+        }
         while (SDL_PollEvent(&ev)) {
+            if (touch.Event(ev)) {
+                continue;
+            }
+            if (port.typing && ev.type == SDL_EVENT_TEXT_INPUT) {
+                if (openedByT && SDL_GetTicks() - openedByT < 250 && (!strcmp(ev.text.text, "t") || !strcmp(ev.text.text, "T"))) {
+                    openedByT = 0;
+                    continue;
+                }
+                openedByT = 0;
+                for (const char *c = ev.text.text; *c; c++) {
+                    if (*c >= 32 && *c < 127 && port.typed.size() < Netplay::kChatMost) {
+                        port.typed += *c;
+                    }
+                }
+                continue;
+            }
+            if (port.typing && ev.type == SDL_EVENT_KEY_DOWN) {
+                if (ev.key.scancode == SDL_SCANCODE_RETURN || ev.key.scancode == SDL_SCANCODE_KP_ENTER) {
+                    port.Say();
+                    chatOpen(false);
+                } else if (ev.key.scancode == SDL_SCANCODE_ESCAPE || ev.key.scancode == SDL_SCANCODE_AC_BACK) {
+                    chatOpen(false);
+                } else if (ev.key.scancode == SDL_SCANCODE_BACKSPACE && !port.typed.empty()) {
+                    port.typed.pop_back();
+                }
+                continue; // (every other key the line's, as text)
+            }
             switch (ev.type) {
             case SDL_EVENT_QUIT: running = false; break;
             case SDL_EVENT_WINDOW_FOCUS_LOST: altAlone = false; break;
@@ -622,10 +908,25 @@ int RunWindowed(Port &port) {
                         barOpened();
                         bar.OpenMenu(0);
                     }
-                } else if (ev.key.scancode == SDL_SCANCODE_ESCAPE || ev.key.scancode == SDL_SCANCODE_F1 || (ev.key.scancode == SDL_SCANCODE_TAB && !KeyBound(SDL_SCANCODE_TAB))) {
+                } else if (!port.menu.IsOpen() && !ev.key.repeat &&
+                    (ev.key.scancode == SDL_SCANCODE_Q || ev.key.scancode == SDL_SCANCODE_E || ev.key.scancode == SDL_SCANCODE_W) &&
+                    KeyZoomHeld(SDL_GetKeyboardState(nullptr))) {
+                    if (ev.key.scancode == SDL_SCANCODE_W) {
+                        port.zoom.Both();
+                    } else {
+                        port.zoom.Press(ev.key.scancode == SDL_SCANCODE_E ? 1 : 0);
+                    }
+                } else if (ev.key.scancode == SDL_SCANCODE_ESCAPE || ev.key.scancode == SDL_SCANCODE_F1 || ev.key.scancode == SDL_SCANCODE_AC_BACK ||
+                           (ev.key.scancode == SDL_SCANCODE_TAB && !KeyBound(SDL_SCANCODE_TAB))) {
+                    // (AC_BACK: a phone's Back)
                     toggleMenu();
                 } else if (KeyBound(ev.key.scancode)) {
                     // (a key the player has given to the game does only that)
+                } else if (port.net && ev.key.scancode == SDL_SCANCODE_T && !ev.key.repeat) {
+                    chatOpen(true);
+                    openedByT = port.typing ? SDL_GetTicks() : 0;
+                } else if (multi && !port.menu.IsOpen() && ev.key.scancode == SDL_SCANCODE_N && !ev.key.repeat) {
+                    port.Key('n');
                 } else if (ev.key.scancode == SDL_SCANCODE_F5 || ev.key.scancode == SDL_SCANCODE_F9) {
                     // F5 keeps the game in the slot, F9 goes back to it; F6 / F7: the slot before, the next
                     if (!port.menu.IsOpen()) {
@@ -647,6 +948,8 @@ int RunWindowed(Port &port) {
                     port.Key('k', kKeyRestart);
                 } else if (!port.menu.IsOpen() && ev.key.scancode == SDL_SCANCODE_BACKSLASH && !ev.key.repeat) {
                     port.Key('k', kKeyExtra);
+                } else if (ev.key.scancode == SDL_SCANCODE_F8 && !ev.key.repeat) {
+                    port.Screenshot(); // (this fork: F8, as the menu bar says; F12 is the soundtrack)
                 } else if (ev.key.scancode == SDL_SCANCODE_F2) {
                     port.test = !port.test; // the operator's test switch
                 } else if (ev.key.scancode == SDL_SCANCODE_F11 ||
@@ -657,16 +960,37 @@ int RunWindowed(Port &port) {
                 }
                 break;
             case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
-                if (ButtonBound(static_cast<SDL_GamepadButton>(ev.gbutton.button))) {
+                if (!port.menu.IsOpen() && Shoulder(ev.gbutton.button) && ZoomHeld(SDL_GetGamepadFromID(ev.gbutton.which))) {
+                    port.zoom.Press(ev.gbutton.button == SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER ? 1 : 0);
+                    stickWaiting = false;
+                } else if (!port.menu.IsOpen() && ev.gbutton.button == SDL_GAMEPAD_BUTTON_RIGHT_STICK &&
+                           !ButtonBound(SDL_GAMEPAD_BUTTON_RIGHT_STICK) && ZoomHeld(SDL_GetGamepadFromID(ev.gbutton.which))) {
+                    port.zoom.Both(); // (not the right stick's own pause)
+                    stickWaiting = false;
+                } else if (ButtonBound(static_cast<SDL_GamepadButton>(ev.gbutton.button))) {
                     // (a button the player has given to the game does only that)
+                } else if (ev.gbutton.button == SDL_GAMEPAD_BUTTON_LEFT_STICK && Zoom::Possible() && !port.menu.IsOpen()) {
+                    stickWaiting = true;
                 } else if (ev.gbutton.button == SDL_GAMEPAD_BUTTON_LEFT_STICK || ev.gbutton.button == SDL_GAMEPAD_BUTTON_GUIDE) {
                     toggleMenu();
                 } else if (port.menu.IsOpen()) {
                     break;
                 } else if (ev.gbutton.button == SDL_GAMEPAD_BUTTON_RIGHT_STICK) {
-                    port.Key('p');
+                    if (port.net) {
+                        chatOpen(!port.typing);
+                    } else {
+                        port.Key('p');
+                    }
                 } else if (ev.gbutton.button == SDL_GAMEPAD_BUTTON_LEFT_SHOULDER) {
-                    port.Key('k', kKeyRestart);
+                    port.Key(multi ? 'n' : 'k', kKeyRestart);
+                }
+                break;
+            case SDL_EVENT_GAMEPAD_BUTTON_UP:
+                if (ev.gbutton.button == SDL_GAMEPAD_BUTTON_LEFT_STICK && stickWaiting) {
+                    stickWaiting = false;
+                    if (!port.menu.IsOpen()) {
+                        toggleMenu();
+                    }
                 }
                 break;
             case SDL_EVENT_GAMEPAD_ADDED:
@@ -687,25 +1011,79 @@ int RunWindowed(Port &port) {
             }
         }
 
+        if (touch.TakeMenuPress()) {
+            toggleMenu();
+        }
+        port.PumpHost(); // (a match hosted from the menu, listened for, the menu open or not)
+        touch.Chat(port.net != nullptr); // (online, from the start or a match hosted from the menu)
+        if (touch.TakeZoomPress()) {
+            if (port.net) {
+                chatOpen(!port.typing);
+            } else {
+                port.zoom.Both();
+            }
+        }
+        if (Zoom::Possible()) {
+            const int asked = FeatureValue("zoom");
+            if (asked != zoomRow) {
+                port.zoom.Choose(asked);
+            }
+            zoomRow = port.zoom.Choice();
+            if (asked != zoomRow) {
+                SetFeatureForNow("zoom", zoomRow);
+                menuDirty = true;
+            }
+        }
         if (port.opt.moviePlay.empty() && !port.opt.autoPlay) {
             // The keyboard is every player's (each has the keys chosen for it); the first gamepad is player
             // 1's, a second player 2's, and so on
             uint16_t pads[Machine::kMaxPlayers] = {};
-            const bool *keys = SDL_GetKeyboardState(nullptr);
-            if (!(SDL_GetModState() & SDL_KMOD_ALT)) {
+            int keyCount = 0;
+            const bool *keys = SDL_GetKeyboardState(&keyCount);
+            if (keysAfterChat) {
+                keysAfterChat = std::any_of(keys, keys + keyCount, [](bool down) { return down; });
+            }
+            if (!(SDL_GetModState() & SDL_KMOD_ALT) && !port.typing && !keysAfterChat) {
                 for (int player = 0; player < Players(); player++) {
                     pads[player] |= ReadKeyboard(keys, player);
                 }
                 port.service = keys[SDL_SCANCODE_9] && !KeyBound(SDL_SCANCODE_9);
             }
+            bool hurry = multi && keys[SDL_SCANCODE_F] && !KeyBound(SDL_SCANCODE_F);
+            // (the camera moved by the arrows with Left Shift held, and by each gamepad's d-pad or stick with its click held)
+            if (!port.menu.IsOpen()) {
+                int across = 0, down = 0;
+                if (KeyZoomHeld(keys) && !(SDL_GetModState() & SDL_KMOD_ALT)) {
+                    across += keys[SDL_SCANCODE_RIGHT] - keys[SDL_SCANCODE_LEFT];
+                    down += keys[SDL_SCANCODE_DOWN] - keys[SDL_SCANCODE_UP];
+                }
+                for (SDL_Gamepad *gp : gamepads) {
+                    if (ZoomHeld(gp)) {
+                        const int x = SDL_GetGamepadAxis(gp, SDL_GAMEPAD_AXIS_LEFTX), y = SDL_GetGamepadAxis(gp, SDL_GAMEPAD_AXIS_LEFTY);
+                        const int right = SDL_GetGamepadButton(gp, SDL_GAMEPAD_BUTTON_DPAD_RIGHT) || x > kDead;
+                        const int left = SDL_GetGamepadButton(gp, SDL_GAMEPAD_BUTTON_DPAD_LEFT) || x < -kDead;
+                        const int lower = SDL_GetGamepadButton(gp, SDL_GAMEPAD_BUTTON_DPAD_DOWN) || y > kDead;
+                        const int higher = SDL_GetGamepadButton(gp, SDL_GAMEPAD_BUTTON_DPAD_UP) || y < -kDead;
+                        across += right - left;
+                        down += lower - higher;
+                        // (the click was the camera's, not the menu's, once it has been moved with it)
+                        if (right || left || lower || higher) {
+                            stickWaiting = false;
+                        }
+                    }
+                }
+                port.zoom.Pan(std::clamp(across, -1, 1), std::clamp(down, -1, 1));
+            }
+            pads[0] |= touch.Read(port.menu.IsOpen());
             bool trigger = false, both = false;
             const bool stepOnTrigger = !PadInputBound(g_bindings, Table(), {-1, SDL_GAMEPAD_AXIS_LEFT_TRIGGER});
             for (size_t i = 0; i < gamepads.size() && static_cast<int>(i) < Players(); i++) {
                 pads[i] |= ReadGamepad(gamepads[i], static_cast<int>(i));
                 const bool left = stepOnTrigger && SDL_GetGamepadAxis(gamepads[i], SDL_GAMEPAD_AXIS_LEFT_TRIGGER) > kDead;
                 trigger = trigger || left;
-                // (while the game runs, the left trigger is its player's Tag: kTag)
-                if (left && !port.paused) {
+                hurry = hurry || (multi && left);
+                // (while the game runs, the left trigger is its player's Tag: kTag; in a Multi game run, fast forward)
+                if (left && !port.paused && !multi) {
                     pads[i] |= kTag;
                 }
                 both = both || (SDL_GetGamepadButton(gamepads[i], SDL_GAMEPAD_BUTTON_START) &&
@@ -713,6 +1091,7 @@ int RunWindowed(Port &port) {
             }
             // The left trigger goes on by one frame (held: frame after frame, after a moment), once the game
             // has been stopped: it does not stop it, so a touch of it while playing does nothing
+            port.hurry = hurry && !port.menu.IsOpen();
             triggerHeld = trigger && port.paused ? triggerHeld + 1 : 0;
             if (!port.menu.IsOpen() && (triggerHeld == 1 || (triggerHeld > 24 && triggerHeld % 4 == 0))) {
                 port.Key('o');
@@ -748,6 +1127,7 @@ int RunWindowed(Port &port) {
                 menuNow |= SDL_GetGamepadButton(gp, SDL_GAMEPAD_BUTTON_SOUTH) ? recomp::kMenuConfirm : 0;
                 menuNow |= SDL_GetGamepadButton(gp, SDL_GAMEPAD_BUTTON_EAST) ? recomp::kMenuBack : 0;
             }
+            menuNow |= touch.Menu();
             // (the gamepad's part of it)
             for (SDL_Gamepad *gp : gamepads) {
                 padMenu |= SDL_GetGamepadButton(gp, SDL_GAMEPAD_BUTTON_DPAD_UP) ? recomp::kMenuUp : 0;
@@ -779,6 +1159,14 @@ int RunWindowed(Port &port) {
                 if (!port.menu.IsOpen()) {
                     heldAtClose = previousPad;
                 }
+            } else if (port.leaving) {
+                // (online, "Leave the match?": Confirm leaves it, Back stays; this side's player stands still meanwhile)
+                if (menuPressed & recomp::kMenuConfirm) {
+                    port.LeaveOnline();
+                } else if (menuPressed & recomp::kMenuBack) {
+                    port.leaving = false;
+                }
+                heldAtClose = previousPad;
             }
             heldAtClose &= previousPad;
             for (int player = 0; player < Machine::kMaxPlayers; player++) {
@@ -811,6 +1199,11 @@ int RunWindowed(Port &port) {
                 shownSize = size;
             }
         }
+        followShader();
+        presenter.SetVsync(FeatureOn("display_vsync")); // (the Display page's VSync, as changed in the menu)
+        if (port.quit) {
+            break;
+        }
         // The picture in the window as the Display page says (present.h)
         int width = 0, height = 0;
         presenter.Size(width, height);
@@ -824,11 +1217,17 @@ int RunWindowed(Port &port) {
         const int barStrip = fullscreen ? 0 : BarStrip(height);
         SDL_FRect where = FitPicture(width, height - barStrip, port.ShownWidth(), Video::kHeight, DisplayShape(), DisplayScaling());
         where.y += barStrip;
+        touch.Layout(width, height, where);
+        int touchWidth = 0, touchHeight = 0;
+        if (touch.TakePicture(touchPicture, touchWidth, touchHeight) && !touchPicture.empty()) {
+            presenter.SetOverlay(touchPicture.data(), touchWidth, touchHeight);
+            barDirty = true; // (a touch screen's controls over it: the bar's picture again when they go)
+        }
         showBar();
         if (barDirty || width != barWidth || height != barHeight) {
             bar.SetArea(width, height, BarDot(height));
             BarPicture(bar, width, height, barPixels, barRegions);
-            presenter.SetOverlay(barPixels, width, height, barRegions);
+            presenter.SetOverlay(barPixels.data(), width, height); // (this fork: transparent outside its regions)
             barDirty = false;
             barWidth = width;
             barHeight = height;
@@ -845,7 +1244,7 @@ int RunWindowed(Port &port) {
                 const uint16_t none[2] = {};
                 online.Tick(none);
                 port.machine->audio.clear();
-                pace();
+                paceFrame();
                 continue;
             }
             SDL_Delay(8);
@@ -860,13 +1259,14 @@ int RunWindowed(Port &port) {
                 menuPicture = menuBase;
                 port.menu.Draw(menuPicture.data(), static_cast<int>(menuWidth), static_cast<int>(menuHeight));
             }
-            presenter.Show(menuPicture.data(), static_cast<int>(menuWidth), static_cast<int>(menuHeight), where);
+            // (not through a shader: the menu is drawn three times the board's size, and is not the game's picture)
+            presenter.Show(menuPicture.data(), static_cast<int>(menuWidth), static_cast<int>(menuHeight), where, nullptr, false);
             if (isOnline) {
                 // (online, the game goes on behind the menu, with this side's controls let go, unheard)
                 const uint16_t none[2] = {};
                 online.Tick(none);
                 port.machine->audio.clear();
-                pace();
+                paceFrame();
                 continue;
             }
             SDL_Delay(8);
@@ -874,11 +1274,13 @@ int RunWindowed(Port &port) {
             continue;
         }
 
-        const int slowBy = port.paused || isOnline ? 1 : port.menu.SlowBy();
+        // (the game's time to the screen's: under 1 slowed, over 1 faster than the board; online, as the board)
+        const auto rate = port.menu.GameRate();
+        const double pace = port.paused || isOnline ? 1.0 : static_cast<double>(rate.frames) / rate.ticks;
         bool ran;
         if (isOnline) {
             // (this side's player: the keyboard's players' keys and the gamepads together; the stress test's two)
-            const bool stress = port.opt.online.mode == OnlineOptions::Mode::Stress;
+            const bool stress = port.opt.gekko.mode == OnlineOptions::Mode::Stress;
             const uint16_t local[2] = {static_cast<uint16_t>(stress ? port.pad[0] : port.pad[0] | port.pad[1]),
                                        stress ? port.pad[1] : uint16_t{0}};
             ran = online.Tick(local) > 0;
@@ -896,8 +1298,8 @@ int RunWindowed(Port &port) {
             // clocks never quite agree. So the sound is played a touch faster when it is piling up and a
             // touch slower when it is running out (a fraction of a percent, far too little to hear), which
             // keeps a frame or two of it waiting: no gaps, no growing delay.
-            // (Slowed, the sound is played slower by as much.)
-            double waiting = SDL_GetAudioStreamQueued(audio) / (4.0 * QSound::kSampleRate) * slowBy;
+            // (Slowed, the sound is played slower by as much; faster, faster.)
+            double waiting = SDL_GetAudioStreamQueued(audio) / (4.0 * QSound::kSampleRate) / pace;
             // (When much more than that is waiting (the game caught up after being held up, say) what waits
             // is thrown away: a click once, rather than sound that stays late for the seconds it would take
             // to play it off.)
@@ -906,7 +1308,7 @@ int RunWindowed(Port &port) {
                 waiting = 0;
                 audioDropped++;
             }
-            const double ratio = (1.0 + std::clamp((waiting - kAudioWaiting) * 0.5, -0.02, 0.02)) / slowBy;
+            const double ratio = (1.0 + std::clamp((waiting - kAudioWaiting) * 0.5, -0.02, 0.02)) * pace;
             SDL_SetAudioStreamFrequencyRatio(audio, static_cast<float>(ratio));
             audioLeast = std::min(audioLeast, waiting);
             if (audioLog && port.frame % 60 == 0) {
@@ -919,7 +1321,7 @@ int RunWindowed(Port &port) {
         made.clear();
         if (ran && port.soundtrackOn && port.soundtrack.Any()) {
             // (fed as the game's sound is: the game's time's worth each frame, kept a frame or two ahead of the device)
-            port.soundtrack.Make(port.machine->soundtrack.state, !FastForward(), musicMade);
+            port.soundtrack.Make(port.machine->soundtrack.state, !FastForward() && !port.hurry, musicMade);
             if (!musicMade.empty()) {
                 const int rate = port.soundtrack.Rate();
                 if (!music) {
@@ -940,18 +1342,20 @@ int RunWindowed(Port &port) {
                     musicSilent = port.menu.muted || audioLog;
                     SDL_SetAudioStreamGain(music, musicSilent ? 0.0f : 1.0f);
                 }
-                double waiting = SDL_GetAudioStreamQueued(music) / (8.0 * musicSpec.freq) * slowBy;
+                double waiting = SDL_GetAudioStreamQueued(music) / (8.0 * musicSpec.freq) / pace;
                 if (waiting > kAudioMost) {
                     SDL_ClearAudioStream(music);
                     waiting = 0;
                 }
-                const double ratio = (1.0 + std::clamp((waiting - kAudioWaiting) * 0.5, -0.02, 0.02)) / slowBy;
+                const double ratio = (1.0 + std::clamp((waiting - kAudioWaiting) * 0.5, -0.02, 0.02)) * pace;
                 SDL_SetAudioStreamFrequencyRatio(music, static_cast<float>(ratio));
                 SDL_PutAudioStreamData(music, musicMade.data(), static_cast<int>(musicMade.size() * sizeof(float)));
             }
         }
 
-        port.Shown(shown);
+        // (zoomed: the part of the picture the camera looks at, the readout's panels as they are)
+        Zoomed zoomed;
+        const bool isZoomed = port.Windowed(shown, zoomed);
         if (isOnline) {
             // What the session says (waiting, connecting, a desync, the other player gone) in the middle, and while
             // playing the ping, delay and rollbacks in a corner
@@ -972,10 +1376,18 @@ int RunWindowed(Port &port) {
                 canvas.Text(across - wide - 4, lines - 11, 1, 0, {200, 220, 255, 255}, stats.c_str());
             }
         }
-        presenter.Show(shown.data(), port.ShownWidth(), Video::kHeight, where);
+        presenter.Show(shown.data(), port.ShownWidth(), Video::kHeight, where, isZoomed ? &zoomed : nullptr);
 
         if (!port.opt.unthrottled && !FastForward()) {
-            pace();
+            paceFrame();
+        }
+    }
+    // (for the checks: what a shaded window showed last, CPS2RECOMP_SHADER_SHOT=FILE.png)
+    if (const char *shot = getenv("CPS2RECOMP_SHADER_SHOT"); shot && presenter.Shaded()) {
+        std::vector<uint32_t> pixels;
+        int width = 0, height = 0;
+        if (presenter.Shader()->ReadBack(pixels, width, height)) {
+            WritePng(shot, pixels.data(), static_cast<uint32_t>(width), static_cast<uint32_t>(height));
         }
     }
     for (SDL_Gamepad *gp : gamepads) {
@@ -986,6 +1398,14 @@ int RunWindowed(Port &port) {
     }
     if (music) {
         SDL_DestroyAudioStream(music);
+    }
+    // (on to a Multi game run's next game: its window where this one is; on macOS the launcher starts it, and must
+    // be in front for it to come forward)
+    if (ProgramEnded() == kNextGame && !MultiGame().empty()) {
+        KeepPlacement(window);
+#ifdef __APPLE__
+        HandFrontToLauncher();
+#endif
     }
     presenter.Close();
     SDL_DestroyWindow(window);

@@ -6,11 +6,13 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <filesystem>
+#include <string>
 #include <vector>
 #include <zlib.h>
 
 // pixels: little-endian XBGR8888 (bytes R, G, B, X), as the Saturn software renderer produces.
-inline void WritePng(const char *path, const uint32_t *pixels, uint32_t w, uint32_t h) {
+inline bool WritePng(const char *path, const uint32_t *pixels, uint32_t w, uint32_t h) {
     std::vector<uint8_t> raw(static_cast<size_t>(w * 3 + 1) * h);
     for (uint32_t y = 0; y < h; y++) {
         uint8_t *row = raw.data() + static_cast<size_t>(y) * (w * 3 + 1);
@@ -26,9 +28,15 @@ inline void WritePng(const char *path, const uint32_t *pixels, uint32_t w, uint3
     std::vector<uint8_t> z(zSize);
     compress2(z.data(), &zSize, raw.data(), raw.size(), 6);
 
+#ifdef _WIN32
+    // (the path is UTF-8: by its wide name, as a folder with an accent is not in the system's code page)
+    const std::string text(path);
+    FILE *f = _wfopen(std::filesystem::path(std::u8string(text.begin(), text.end())).wstring().c_str(), L"wb");
+#else
     FILE *f = fopen(path, "wb");
+#endif
     if (!f) {
-        return;
+        return false;
     }
     static const uint8_t sig[8] = {0x89, 'P', 'N', 'G', 13, 10, 26, 10};
     fwrite(sig, 1, 8, f);
@@ -57,5 +65,6 @@ inline void WritePng(const char *path, const uint32_t *pixels, uint32_t w, uint3
     chunk("IHDR", ihdr, 13);
     chunk("IDAT", z.data(), static_cast<uint32_t>(zSize));
     chunk("IEND", nullptr, 0);
-    fclose(f);
+    const bool written = !ferror(f);
+    return fclose(f) == 0 && written;
 }

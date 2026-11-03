@@ -11,13 +11,15 @@
 
 namespace cps2recomp {
 
-// Which board the game is on. A CPS-2 unless the game's game.cfg says `board = cps1` (a CPS-1 with QSound, the
+// Which board the game is on. A CPS-2 unless the game's game.cfg says `board = cps1` (with `pairs=N` after it when
+// the program starts with N pairs of byte-wide files) (a CPS-1 with QSound, the
 // "CPS-1.5": a 12 MHz 68000 with an unenciphered program, the objects in the video memory, the Z80's program
 // enciphered with Kabuki). A CPS-1's CPS-B chip has its registers where the game's chip has them (game.cfg's
 // `cps_b`, the byte offsets as MAME's table of the chips has them: layer control, the four priority masks, palette
-// control, then the bits of the layer control that switch scroll screens 1-3 on). The CPS-2's are the defaults.
-// `board = cps1-classic` is a CPS-1 with no QSound (Street Fighter II's): its Z80's program is not enciphered, and
-// as long as the toolkit has no YM2151 and OKI MSM6295 for it the Z80 stays stopped and the game plays silent.
+// control, then the bits of the layer control that switch scroll screens 1-3 on; then, for a chip with one, its ID
+// register's offset and value). The CPS-2's are the defaults.
+// `board = cps1-classic` (`pairs=N` too) is a CPS-1 with no QSound (Street Fighter II's): its Z80's program is not enciphered, and
+// its Z80 drives the YM2151 and OKI MSM6295 through machine/cps1_sound.cpp.
 // A CPS-1's graphics mapper (the PAL that maps each kind of tile's numbers to the graphics ROMs: game.cfg's
 // `gfx_map`, as MAME's tables have them): the banks' sizes, then ranges of a kind's tile numbers (in 64-byte units:
 // an 8-pixel tile's number, a 16-pixel one's times 2, a 32-pixel one's times 8) and the bank they are in. With none,
@@ -32,11 +34,18 @@ struct GfxRange {
 struct Board {
     bool cps1 = false;
     bool neogeo = false; // (`board = neogeo`: a Neo Geo MVS, not a Capcom board at all; machine/neogeo.h)
-    bool qsound = true; // (false: the classic CPS-1's sound, which the toolkit does not have yet)
+    bool qsound = true; // (false: classic CPS-1's YM2151/OKI sound)
     uint8_t layerControl = 0x26;
     uint8_t priority[4] = {0x28, 0x2A, 0x2C, 0x2E};
     uint8_t paletteControl = 0x30;
     uint8_t enable[3] = {0x02, 0x04, 0x08};
+    // Pairs of files the program list starts with, each the even bytes then the odd ones of the same words (MAME's
+    // ROM_LOAD16_BYTE: game.cfg's `board = cps1 pairs=N`); the rest of the list whole words as usual
+    int programPairs = 0;
+    // The chip's ID register, which some games check as they start (MAME's first two values for the chip: the
+    // register's offset and what it reads; 0: none): two more values after cps_b's nine
+    uint8_t idRegister = 0;
+    uint16_t idValue = 0;
     uint32_t gfxBanks[4] = {};
     std::vector<GfxRange> gfxMap;
     // (a CPS-1) its 68000's clock in MHz, 10 or 12 (game.cfg's cpu_clock), and its three banks of DIP switches, A, B
@@ -60,6 +69,10 @@ struct RomSet {
     std::vector<uint8_t> soundProgram;
     // The QSound chip's samples: signed bytes
     std::vector<uint8_t> samples;
+
+    // Which set it is (RomList::set, or one of its others: its set, and the name ROM collections give it; "" for the
+    // set's own)
+    std::string set, name;
 
     uint32_t key[2] = {};     // the board's 64-bit key
     uint32_t encryptedEnd = 0; // program below this address is enciphered
@@ -88,18 +101,29 @@ struct RomList {
     // The set's name in ROM collections, and its parent set's (collections often keep the files a set
     // shares with its parent only in the parent's zip)
     std::string set, parent;
+    // Other sets of the same game the port plays as well (game.cfg's other_set: another region, whose program
+    // is the same code, with the region in the header or in one instruction): their own program files and key,
+    // the rest the set's. Read when the set's own program is not there.
+    struct Other {
+        std::string set, name;
+        std::vector<RomFile> program, key;
+    };
+    std::vector<Other> others;
     // Where the first graphics file sits in the graphics space (a list that starts "@800000": boards with
     // few graphics ROMs have them in the last sockets, and the game's tile numbers count from the first)
     size_t graphicsBase = 0;
     Board board;
 };
-// (board, cpsB: game.cfg's `board` and `cps_b`, or "")
+// (board, cpsB: game.cfg's `board` and `cps_b`, or ""; others: its other_set, "set | name | program | key" with
+// " || " between two)
 RomList ParseRomList(const char *program, const char *graphics, const char *soundProgram, const char *samples,
-                     const char *key, const char *set = "", const char *parent = "", const char *board = "", const char *cpsB = "");
+                     const char *key, const char *set = "", const char *parent = "", const char *board = "", const char *cpsB = "",
+                     const char *others = "");
 
 // Reads the set from `path`: a folder of its files, or a zip (<set>.zip; files not in it are looked for in
 // the parent's and the set's zips beside it, and a folder's files can be in such zips inside it). Files in
-// zips are found by checksum, whatever they are called. Nothing is written or changed.
+// zips are found by checksum, whatever they are called. Nothing is written or changed. Where the set's own
+// program is not there, each of its others' is tried (RomSet::set says which was read).
 // False with a message if a file is missing or is not the one expected.
 bool LoadRomSet(const std::string &path, const RomList &list, RomSet &set, std::string &error);
 

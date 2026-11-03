@@ -44,6 +44,9 @@ enum : unsigned {
     // The game's own: the collection's launcher shows it on the game's page and never sets it for another game that
     // has a feature of the same name (a record, a number that means something else in each game)
     kFeatureOwn = 64,
+    // A long choice whose list in the in-game menu the player may make shorter on the launcher (recomp-common/settings.h:
+    // MenuChoices, settings.ini's [menu]): the menu goes past the choices left out
+    kFeatureMenuChoices = 128,
 };
 
 // Something the game's sources can do when the player asks (a row of the in-game menu, and a key if it has
@@ -90,6 +93,12 @@ struct Game {
     // For a game whose sources can ask for a wider picture (video.h, Video::wide): how many columns the
     // widest will have with the player's choices as they are, so that the window starts in its shape
     int (*widestPicture)() = nullptr;
+    // For the port's camera (its zoom, port/zoom.h): where to look to see player `player`'s fighter (0: player 1's
+    // side), in the picture's pixels; false when there is none to look at now (no fight on). Not given: no zoom.
+    bool (*focus)(int player, int &x, int &y) = nullptr;
+    // ... how far above the feet that place is, and how tall a fighter stands from its feet, so that the camera keeping
+    // both in the picture shows them whole
+    int focusLift = 44, focusTall = 120;
     // Not to run ahead now (the port's run-ahead): a mode whose own workings a save state does not wholly hold,
     // so that frames run and taken back would change it. Not given: run-ahead whenever it is on.
     bool (*noRunAhead)() = nullptr;
@@ -133,6 +142,11 @@ int FeatureValue(const char *name);
 // What online play turns off (Game::online): a player's own choice that would change the board both share
 bool OnlineOff(const std::string &name);
 void SetFeatureValue(const char *name, int value);
+// ... for this run only, settings.ini left as it is (online play: the host's choices, port/netplay.h)
+void SetFeatureForNow(const char *name, int value);
+// Every feature back as the launcher's default preset (Enhanced) has it, and settings.ini so (the menu's Reset all
+// options)
+void ResetFeatures();
 // What the player has chosen for a feature, whether it works now or not (the menu shows this; FeatureValue gives
 // 0 for a training aid outside a training session)
 int FeatureSetting(const char *name);
@@ -165,6 +179,11 @@ const std::string &MultiGame();
 // The game's sources end the program, with this exit code: the window closes after the frame
 void EndProgram(int code);
 int ProgramEnded(); // (-1: not asked)
+// In a Multi game run the player can ask for the next game (N, a gamepad's left shoulder): the game's sources
+// end it their own way (the endless battle fades out); if they have not within a couple of seconds, the port
+// ends it. (-1: not asked; else the port's tick it was asked on)
+void AskNextGame(int64_t tick);
+int64_t NextGameAsked();
 
 // The readout: lines of text the game's sources want shown over the picture while it plays (a training
 // display and the like). The port draws each as a small panel.
@@ -172,6 +191,7 @@ struct HudLine {
     float x, y;       // where, as parts of the picture's width and height (0-1)
     int align;        // -1: the text starts at x; 0: is centred on it; 1: ends at it
     std::string text;
+    uint8_t r = 255, g = 255, b = 255; // (its colour: white unless said)
     bool operator==(const HudLine &) const = default;
 };
 void SetHud(std::vector<HudLine> lines);

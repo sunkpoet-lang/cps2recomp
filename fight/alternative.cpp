@@ -4,6 +4,7 @@
 // The "Alternative modes" page, attract mode and the stage viewer (alternative.h), made from Vampire Savior's and Street
 // Fighter Alpha 2's, which were the same but for where each game keeps things.
 #include "alternative.h"
+#include "model.h"
 
 #include "spare.h"
 #include "state.h"
@@ -53,6 +54,9 @@ namespace {
     int Stages() {
         return static_cast<int>(d.stageNames.size());
     }
+    int InfiniteStages() {
+        return d.infiniteStages > 0 && d.infiniteStages < Stages() ? d.infiniteStages : Stages();
+    }
     int WideSide() {
         return d.wideSide ? d.wideSide() : 0;
     }
@@ -60,7 +64,7 @@ namespace {
         return d.wideMargin ? d.wideMargin() : 0;
     }
     uint32_t Player(int n) {
-        return d.player1 + static_cast<uint32_t>(n) * d.playerSize;
+        return d.playerAt ? d.playerAt(n) : d.player1 + static_cast<uint32_t>(n) * d.playerSize;
     }
 
     void Fast(bool on) {
@@ -145,7 +149,7 @@ namespace {
         g_chosenStage = FeatureValue("viewer_stage");
         g.infinite = g_chosenStage == Stages();
         g.stage = g.infinite ? 1 : std::clamp(g_chosenStage, 0, Stages() - 1) + 1;
-        g.next = g.stage % Stages() + 1;
+        g.next = g.stage % InfiniteStages() + 1;
         g.camera = g.infinite ? LeftEnd() : (LeftEnd() + RightEnd()) / 2;
         g_wanted.stage = g.stage;
         machine.Reset();
@@ -272,7 +276,7 @@ namespace {
             // The next stage has come all the way in: its machine is the one the port runs from here, and the stage
             // after it is switched on
             g.stage = g.next;
-            g.next = g.stage % Stages() + 1;
+            g.next = g.stage % InfiniteStages() + 1;
             g.camera = LeftEnd();
             g.slide = 0;
             g.nextReady = false;
@@ -365,6 +369,26 @@ bool RoundFought() {
     }
     return Ram16(d.steps) == 2 && Ram16(d.steps + 4) == d.gameMatch && Ram16(d.steps + 8) == d.matchRound &&
            Ram16(d.steps + 12) == d.roundFought;
+}
+
+namespace {
+    void (*g_place)(int player, int &x, int &y) = nullptr;
+    int g_lift = 0;
+} // namespace
+
+void Focus(void (*place)(int player, int &x, int &y), int lift, int tall) {
+    g_place = place;
+    g_lift = lift;
+    TheGame().focusLift = lift;
+    TheGame().focusTall = tall;
+    TheGame().focus = [](int player, int &x, int &y) {
+        if (!RoundFought() || model::On()) {
+            return false;
+        }
+        g_place(player, x, y);
+        y -= g_lift;
+        return true;
+    };
 }
 
 bool Choosing() {

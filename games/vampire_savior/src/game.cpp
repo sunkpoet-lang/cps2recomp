@@ -26,6 +26,7 @@ void RegisterRows();      // rows.cpp
 void RegisterPicture();   // picture.cpp
 void RegisterEdges();     // edges.cpp
 void RegisterPieces();    // pieces.cpp
+void RegisterComputer();  // computer.cpp
 void RegisterFrames();    // frames.cpp
 void RegisterTraining(); // training.cpp
 void TrainingBeforeFrame(Machine &machine);
@@ -50,6 +51,7 @@ void RegisterTitle(); // title.cpp
 void TitleFrame(Machine &machine);
 void RegisterWidescreen(); // widescreen.cpp
 void WidescreenBeforeFrame(Machine &machine);
+void WidescreenState(Archive &ar);
 void RegisterColours(); // colours.cpp (the toolkit's fight/colours.h)
 
 void RegisterMusic(); // music.cpp
@@ -79,6 +81,7 @@ void RegisterGame() {
     RegisterPicture();
     RegisterEdges();
     RegisterPieces();
+    RegisterComputer();
     RegisterFrames();
     RegisterWidescreen();
     RegisterTitle();
@@ -124,6 +127,7 @@ void RegisterGame() {
         ModesState(ar);
         BattleState(ar);
         ModelState(ar);
+        WidescreenState(ar);
     };
     // With the arcade timing, the game's own code runs in place of the rewrites but where they carry what the
     // port adds (game.h, rewritesNeeded): training mode, the modes of the sources' own, widescreen, the cheats

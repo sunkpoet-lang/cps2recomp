@@ -28,6 +28,11 @@ struct M68KBus {
     virtual uint16_t Fetch16(uint32_t address) = 0;
     // The CPU takes the interrupt of this level
     virtual void InterruptAck(unsigned level) {}
+    // Trial execution in the block checker: MMIO writes may change another address's read (a hardware multiplier).
+    // Reflect only those dependencies, then restore them before the reference interpreter runs.
+    virtual void BeginCheck() {}
+    virtual void CheckWrite(uint32_t address, unsigned size, uint32_t value) {}
+    virtual void EndCheck() {}
 };
 
 class M68K;
@@ -121,6 +126,18 @@ public:
         waitArmed = false;
     }
     unsigned depth = 0;  // of translated routines calling one another on the host's stack
+
+    // A 68000 of another board run beside the game's (runtime/guest.h) has hooks of its own, not the game's (which are at
+    // the game's addresses): `ownHooked` a byte for each word of its ROM (not 0: a hook there), `ownHook` called there
+    // as a game's hook is (true: it has done the instruction's work, the PC set). Set, the game's hooks are never asked.
+    // Such a 68000 runs only on the interpreter (Mode::Interpreter): the translated code is the game's.
+    const uint8_t *ownHooked = nullptr;
+    uint32_t ownHookedSize = 0; // (bytes of ROM it covers)
+    bool (*ownHook)(M68K &c, uint32_t address) = nullptr;
+    const void *ownContext = nullptr; // (whose hooks they are, for ownHook)
+    bool OwnHook(uint32_t address) {
+        return address < ownHookedSize && ownHooked[address / 2] && ownHook(*this, address);
+    }
 
     // What translated code reaches without going through the bus (set by the machine)
     M68KBus &bus;

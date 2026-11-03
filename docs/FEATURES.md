@@ -27,7 +27,7 @@ its own that only shares a name with another game's (a record, an animation's nu
 
 A feature can be a choice of several things instead of on or off (`choices` in its entry; the first
 means off; `FeatureValue` gives the number chosen; `--features name=2`), can last for one run only
-(`kFeatureSession`: not kept in settings.ini, off again at Reset), and the menu shows each category
+(`kFeatureSession`: not kept in settings.ini, off again at Reset game), and the menu shows each category
 as a page of its own.
 
 Every game also has the port's own features (`RegisterPortFeatures`, `port/main.cpp`): run-ahead on
@@ -47,6 +47,17 @@ of its own there (the Controllers page's Layout for and Its own layout; kept in 
 out with its own launcher's table; the shared buttons its table has not got are `none` in its `settings.ini`, and the
 game, which reads the shared table, has only its own. A fighting game's table (and the shared one) has two more:
 `ppp` and `kkk`, all three punches and all three kicks at once, with no key or button until they are given one.
+
+A controller SDL doesn't know as a gamepad (an arcade panel that isn't an XInput one, issue #213) is given its
+mapping by a `gamecontrollerdb.txt` in [SDL_GameControllerDB](https://github.com/mdqinc/SDL_GameControllerDB)'s form:
+beside the programs, in the launcher's folder, or (the game only) in the game's own. The launcher and the game read it
+when they start (`recomp-common/gamepads.h`); a line there for the same controller wins over SDL's own.
+
+## Screenshots
+
+F12 saves the picture as the window shows it, at the board's size (384 by 224, wider in widescreen), with the
+readouts on it but not the camera's zoom, to `screenshots/` in the game's folder, as `<game> <date> <time>.png`
+(`Port::Screenshot`, issue #31). Where it went is said at the bottom for a few seconds.
 
 **Rapid fire** is the port's own (`rapid_fire`, Game page, every game): a held button is the game's pressed for two
 frames and let go for two, for the first button or for all of them, from the frame it goes down. Movies keep what the
@@ -97,6 +108,21 @@ The port can stop the game (`P`), go on a frame at a time (`O`) and run it at a 
 or an eighth of its speed (the menu's Speed row, `-` and `=`). The game's state is the same
 whatever was done (`--keys TICK:KEY,...` presses these keys in a headless run for tests, sets
 features with `fNAME=N` and runs commands with `cNAME`).
+
+## The camera's zoom
+
+The window can show part of the picture larger, about one player's fighter (`port/zoom.h`): a gamepad's left
+stick's click held and a shoulder pressed, left for player 1 and right for player 2, at 1.25x to 2x (keyboard:
+Left Shift held, Q and E). The fighter stays in the middle; the d-pad (arrows) with the click (Shift) held moves
+the camera off it. The right stick's click (W) keeps both fighters in the picture instead, as close as shows both
+whole; how much room a fighter takes is `Game::focusTall` (from its feet up) and `focusLift`. It is the
+window's alone (the game, save states and screenshots never see it). A game has it once its sources say where to
+look: `TheGame().focus = [](int player, int &x, int &y) { ...; return true; }`, the place in the picture's pixels
+(widescreen's columns counted) to keep in the middle, false when there is no fighter to look at. A fighting game gives
+it through `modes::Focus(place, lift, tall)` (`fight/alternative.h`): `place` the fighter's feet in the picture, `lift`
+how far above them to look, `tall` how tall a fighter stands; it is on only while a round is fought and not in the
+model viewer. Vampire Savior's
+is in `src/camera.cpp`: where the fighter stands, 44 lines up from its feet. `--zoom SIZE:PLAYER` starts zoomed.
 
 ## Where a feature does its work
 
@@ -167,7 +193,8 @@ recorded; `make check` and `make check-rewrites` run it first. To change the men
 recomp-common, run its tests, commit there, then run `tools/sync-common.sh` here and commit the copy.
 
 `port/menu.{h,cpp}` is what is this toolkit's about it: the first page's rows in their three groups
-(save states; the pages, Speed, Insert coin, Player 2 joins; Reset, Quit game, Resume), CPS-2's
+(save states; the pages, Speed, Insert coin, Player 2 joins; Reset all options, Reset game, Quit game,
+Resume), CPS-2's
 buttons turned into the menu's six, the speeds, and the games' features and commands handed over.
 A game needs nothing more: its features and commands show up from `TheGame()`. A game with pages
 that are under another page, or a page that belongs at the head of the menu before the save states

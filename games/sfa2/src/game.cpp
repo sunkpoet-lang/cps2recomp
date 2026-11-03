@@ -21,6 +21,7 @@ void RegisterDamage();    // damage.cpp
 void RegisterHit();       // hit.cpp
 void RegisterThrows();    // throws.cpp
 void RegisterPlayer();    // player.cpp
+void RegisterComputer();  // computer.cpp
 void TrainingBeforeFrame(Machine &machine);
 void TrainingFrame(Machine &machine);
 void TrainingState(Archive &ar);
@@ -45,6 +46,7 @@ void RegisterColours(); // colours.cpp
 
 void RegisterWidescreen(); // widescreen.cpp
 void WidescreenBeforeFrame(Machine &machine);
+void WidescreenState(Archive &ar);
 
 void RegisterMachines(); // machines.cpp
 void RegisterTitle();    // title.cpp
@@ -77,6 +79,7 @@ void RegisterGame() {
     RegisterHit();
     RegisterThrows();
     RegisterPlayer();
+    RegisterComputer();
     RegisterWidescreen();
     RegisterTitle();
     // The training aids work only in a training session (the dummy's are the toolkit's: fight::RegisterDummy)
@@ -109,6 +112,7 @@ void RegisterGame() {
         ModesState(ar);
         BattleState(ar);
         ModelState(ar);
+        WidescreenState(ar);
     };
     // With the arcade timing, the game's own code runs in place of the rewrites but where they carry what the
     // port adds (game.h, rewritesNeeded): training mode, the modes of the sources' own, widescreen, the cheats
@@ -123,6 +127,10 @@ void RegisterGame() {
     };
     // Its own, never set for the other games by the collection's launcher: the records, and the animations' numbers
     OwnFeatures({"survival_best", "ringout_best", "model_animation", "colours_animation"});
+    // (and the board's damage levels, where this game names them otherwise: family.h)
+    if (sfa2::family::kDamageLevelsOwn) {
+        OwnFeatures({"board_damage"});
+    }
 }
 
 } // namespace cps2recomp

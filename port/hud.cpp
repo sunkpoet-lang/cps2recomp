@@ -34,13 +34,13 @@ std::vector<HudPanel> HudPanels(int width, int height) {
         }
         panel.pixels.assign(static_cast<size_t>(panel.width) * panel.height, 0xFF000000u | (30 << 16) | (22 << 8) | 20);
         const Canvas canvas{panel.pixels.data(), panel.width, panel.height};
-        canvas.Text(static_cast<float>(pad), static_cast<float>(pad), d, 0, {255, 255, 255, 255}, line.text.c_str());
+        canvas.Text(static_cast<float>(pad), static_cast<float>(pad), d, 0, {line.r, line.g, line.b, 255}, line.text.c_str());
         panels.push_back(std::move(panel));
     }
     return panels;
 }
 
-void DrawHud(uint32_t *pixels, int width, int height) {
+void DrawHud(uint32_t *pixels, int width, int height, std::vector<SDL_Rect> *panels) {
     // The boxes first, so that the text is over them
     const recomp::text::Canvas canvas{pixels, width, height};
     for (const cps2recomp::HudBox &box : cps2recomp::Boxes()) {
@@ -60,6 +60,9 @@ void DrawHud(uint32_t *pixels, int width, int height) {
         canvas.Fill(x + w - 1, y, 1, h, line);
     }
     for (const HudPanel &panel : HudPanels(width, height)) {
+        if (panels) {
+            panels->push_back({panel.x, panel.y, panel.width, panel.height});
+        }
         for (int row = 0; row < panel.height; row++) {
             std::copy_n(&panel.pixels[static_cast<size_t>(row) * panel.width], panel.width,
                         pixels + static_cast<size_t>(panel.y + row) * width + panel.x);

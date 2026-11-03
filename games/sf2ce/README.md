@@ -7,11 +7,10 @@
 An unofficial native PC port of the arcade game *Street Fighter II′: Champion Edition* (Capcom, 1992, CPS-1 board)
 for macOS, Linux (Steam Deck included) and Windows, made by static recompilation.
 
-> **A first port, with its sound (this fork).** This is the game as the board plays it, translated, on the toolkit's
-> classic CPS-1 board: the picture, the six buttons, and the board's music, effects and voices, but none of the
-> features the other fighting games here have. The sound plays the board's YM2151 with
-> [ymfm](https://github.com/aaronsgiles/ymfm) (BSD-3-Clause, `third_party/`): an emulator's code, which upstream does
-> not take (CONTRIBUTING.md, rule 4), so it lives only in this fork's `sf2-sonido` branch.
+> **Initial classic CPS-1 port, with sound.** The game's picture, controls and arcade music and effects run on the
+> toolkit's shared classic CPS-1 board. Board options and cheats are declared in `game.cfg`; there is no training
+> mode yet. The YM2151 uses [ymfm](https://github.com/aaronsgiles/ymfm), the BSD-3-Clause library listed in
+> [THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md). The OKI MSM6295 is implemented in `sound/okim6295.cpp`.
 
 **No game files are included.** You need your own copy of the game: the arcade ROM set `sf2ce` (World, 920513), from
 a board you own. This project cannot help you get one.
@@ -48,11 +47,7 @@ board needed and Cadillacs and Dinosaurs had not:
 - **The kicks** at 800176: player 1's in bits 0 to 2, player 2's in bits 4 to 6, light to hard. Each kick checked
   from the start of a round: a light, a medium and Ryu's roundhouse.
 
-Made-up play found 1,288 entries: 51,653 instructions translated, 25 left to the interpreter, 18 of them data a guess
-took for code, all the code reached below 0C6232. A run of 6,000 frames (the title, player select, the versus
-screen, a whole round to its time over) ran 0.12% of its instructions in the interpreter, in silence.
-
-**The sound** (this fork; `machine/cps1_sound.cpp`). The board's Z80 runs its program at 3.579545 MHz on its own map
+**The sound** ( `machine/cps1_sound.cpp`). The board's Z80 runs its program at 3.579545 MHz on its own map
 (ROM, a bank of it at 8000, RAM at D000, the YM2151 at F000, the OKI at F002, the bank at F004, the OKI's pin 7 at
 F006), and reads the 68000's requests from the two latches at 800181 and 800189 (F008 and F00A). Its interrupt is the
 YM2151's line (a level, `Z80::SetInterruptLine`), about 250 times a second from the chip's timers, which set the
@@ -60,11 +55,6 @@ music's tempo. The YM2151 is ymfm's; the OKI MSM6295 (`sound/okim6295.cpp`) was 
 four voices of 4-bit ADPCM from the sample ROMs' table. The two are mixed to one speaker, as on the board, at the
 port's output rate, and kept in save states (version 9; older ones load, their sound starting afresh). DIP switch C6
 (the demonstrations' sound) is on, as the boards left the factory, so the attract mode plays its music.
-
-Checked without a window: 6,000 frames with no hang of the Z80, its interrupt steady, the requests read at F008, music
-and effects throughout a match, no sample clipped; the same sound with and without run-ahead, byte for byte; HSF2's
-picture and sound unchanged. The translated sound program and the interpreter sound alike (they differ by a few
-cycles, as on the QSound boards). It costs about 15% of the speed without a window (580 frames a second against 685).
 
 **The DIP switches** are as the boards left the factory (`dip` in game.cfg, `FF FC 9F`): difficulty 3 (normal), continues allowed, the demonstrations' sound. Before, the port read them all off: the easiest difficulty and no continues.
 
@@ -76,3 +66,19 @@ knockouts (player 2). The bosses can be chosen in this game, so there is no chea
 time; off, the game goes on as it was.
 
 **Next.** The DIP switches by name (free play, difficulty), and the features the other fighting games have.
+
+## Reproducible checks
+
+`movies/smoke_play.txt` supplies 40,000 frames of input from reset. It exercises coin/start and gameplay;
+it is a smoke route, not a completed game. Ghouls finishes its board tests later than Street Fighter II;
+its first coin/start during those tests is ignored and the next pair starts play.
+
+```sh
+make GAME=sf2ce check FRAMES=40000 MOVIE=games/sf2ce/movies/smoke_play.txt
+make GAME=sf2ce check-rollback FRAMES=12000
+make GAME=sf2ce check-online FRAMES=6000
+```
+
+The online check uses two local peers and simulated packet delay/loss; it does not test Internet play.
+The classic sound program runs on the Z80. `check-sound`'s QSound high-level-driver comparison is not applicable.
+Windows is the tested platform for this contribution; macOS/Linux builds still need verification.

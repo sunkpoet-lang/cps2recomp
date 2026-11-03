@@ -73,11 +73,19 @@ namespace battle {
 
 constexpr uint32_t kMostRecord = 0x400; // the most bytes of a player's record (kept for the way down)
 
+// The random number of the Alphas and the Vampire Savior games (sfa's 016462): three times itself, the top byte of
+// that its new top byte, and added to its bottom one
+inline uint16_t CapcomRandomNext(uint16_t random) {
+    const uint8_t top = static_cast<uint8_t>((random * 3) >> 8);
+    return static_cast<uint16_t>(top << 8 | static_cast<uint8_t>(random + top));
+}
+
 struct Description {
     // --- the game's memory ---
     uint32_t result = 0;            // byte: the round's result: 0 still going, 1 player 1 has won, 2 player 2, 3 neither
     // ... or, for a game that keeps it some other way, the same worked out from its memory (nullptr: the byte)
     uint8_t (*resultNow)() = nullptr;
+    int roundsToWin = 2;            // rounds a player wins a match with (the board's usual: online play's win streaks)
     uint32_t cameraX = 0, cameraY = 0; // words: where the camera is (the picture's left edge and bottom)
     int cameraLeft = 256, cameraRight = 640; // the camera's ends across on every stage (the board's picture)
     // A camera whose words move (with the stage, say): their addresses now; and stages whose camera's ends differ:
@@ -89,6 +97,10 @@ struct Description {
     // players' first, their objects' places across (longs, 16 bits of fraction) at `x`
     uint32_t player1 = 0, playerSize = 0;
     int playerRecords = 0;
+    // A tag-team game that keeps a side's two characters in records of their own (not swapped at a tag): the records
+    // of the side's character on point now and of its partner (none: player1 and the one after it, and `partner` on)
+    uint32_t (*playerAt)(int n) = nullptr;
+    uint32_t (*partnerAt)(int n) = nullptr;
     uint32_t thrown = 0, thrownSize = 0;
     int thrownRecords = 0;
     uint32_t active = 0, x = 0, y = 0;
@@ -119,6 +131,11 @@ struct Description {
     // A word: the game's random number (a match begun from the character choice is given its own, or every one
     // would play out the same way from there), or 0: none
     uint32_t random = 0;
+    // How the game's routine steps it on, or none. With it, a match's own is the game's stepped on so many times at
+    // random: never a word the game's routine would not come to (without it, a word at random), as one of the few it
+    // keeps going round between two, or one, and every choice made by it the same (a script of the computer's
+    // breaking in on itself without end)
+    uint16_t (*randomNext)(uint16_t random) = nullptr;
     // Health (words): what the player has, and the most it can have back (the bar's other end), and in all;
     // what survival gives back for an opponent beaten. With `ceilingShown` the second is what the bar shows,
     // put at what is left.
@@ -176,6 +193,9 @@ struct Description {
     // ... and whether something of the other's is near enough for the side's fighter to guard (the game's own test, as
     // the training dummy's guard asks it; nullptr: never), when the coach lets the game's play guard it
     bool (*attackComing)(Machine &machine, int side) = nullptr;
+    // ... or none of that: the game's computer plays the modes itself (its scripts ask what is below, ComputerMode...,
+    // and ask for its tags), and the coach takes no side's controls and tags for none
+    bool computerPlaysModes = false;
 
     // A game is being played (no: the board was reset)
     bool (*inGame)() = nullptr;
@@ -211,6 +231,10 @@ struct Description {
 
 // The game's description, and the menu's pages, commands and features of the modes
 void Register(const Description &description);
+// The round's result now (0 still going, 1 player 1 has won, 2 player 2, 3 neither), or -1 for a game that has no
+// description; and how many rounds win a match (online play's win streaks: port/main.cpp)
+int RoundResultNow();
+int RoundsToWin();
 // The tag-team modes (tag.h) for the team battle: each fighter of a side played by a person of its own, the side's
 // panel whoever's fighter is on (no tagging in: the next comes on at a knock-down). `labelY`: where the labels go.
 void RegisterTeamTag(float labelY);
@@ -239,5 +263,17 @@ bool RingOutLetsOut(uint32_t player);
 // The ring out: whether a player the game plays may walk back now, as its computer wants to (not with its back near its
 // end, coached: battle.cpp); the game's sources ask where the computer's walk takes its way
 bool RingOutMayWalkBack(uint32_t player);
+// For a game whose computer plays the modes itself (Description::computerPlaysModes), what the computer playing the
+// player whose record is at `player` is told: the mode its fight is in now (or kNone: none, or a side not the
+// computer's); in a ring out, how far its fighter's back is from the end behind it and the other's from theirs
+// (pixels); in the tag style, whether its fighter wants to go off (low, with a partner who has more, and not just
+// after a tag); and how well it plays, by the menu's CPU difficulty or the game's, 0 to 1000. It asks for a tag,
+// taken when its fighter can tag (in the frames after).
+enum class ComputerMode { kNone, kRingOut, kTag };
+ComputerMode ComputerModeOf(uint32_t player);
+int ComputerBack(uint32_t player, bool other);
+bool ComputerTagWanted(uint32_t player);
+int ComputerSkill();
+void ComputerAsksTag(uint32_t player);
 
 } // namespace cps2recomp

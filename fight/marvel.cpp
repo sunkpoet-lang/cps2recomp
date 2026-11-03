@@ -25,6 +25,18 @@ namespace {
     }
 } // namespace
 
+void CopyFrameBoxSets(Machine &machine, uint32_t player, uint32_t frame) {
+    const auto long_ = [&](uint32_t at) { return (static_cast<uint32_t>(machine.Read16(at)) << 16) | machine.Read16(at + 2); };
+    SetRam16(player + 0x3C, machine.Read16(frame));
+    SetRam32(player + 0x40, long_(frame + 0x04));
+    SetRam32(player + 0x62, long_(frame + 0x08));
+    SetRam16(player + 0x66, machine.Read16(frame + 0x0C));
+    const uint32_t boxes = Ram32(player + 0x68) + static_cast<uint32_t>(machine.Read16(frame + 0x0E)) * 16;
+    for (uint32_t at = 0; at < 16; at += 4) {
+        SetRam32(player + 0x70 + at, long_(boxes + at));
+    }
+}
+
 void Describe(const Engine &engine) {
     e = engine;
 }
@@ -35,7 +47,7 @@ const Engine &Described() {
 // --- the players ---
 
 uint32_t Player(int n) {
-    return e.player1 + static_cast<uint32_t>(n) * e.playerSize;
+    return e.playerAt ? e.playerAt(n) : e.player1 + static_cast<uint32_t>(n) * e.playerSize;
 }
 int PlayerOf(uint32_t record) {
     record &= 0xFFFFFF;
@@ -99,7 +111,7 @@ bool PlayerStep(M68K &c) {
     view.control = Ram16(player + e.control) == 0 ? fight::StepView::Own : fight::StepView::Reeling;
     view.frozen = stop != 0;
     view.canAct = CanAct(player);
-    view.attacking = (Ram8(player + e.attackPhase) & 0xC0) != 0;
+    view.attacking = (Ram8(player + e.attackPhase) & e.attackPhaseMask) != 0;
     view.jumping = Ram8(player + e.action) == e.actionJump || InAir(player);
     view.attackOut = AttackOut(player);
     session::Step(n, view);
@@ -265,9 +277,37 @@ namespace {
     // nearer the middle across; a mode's camera wanted beyond its ends is not kept in at all
     bool KeepCamera(M68K &c) {
         const uint32_t camera = c.a[6] & 0xFFFFFF;
-        if (modes::CameraAt().beyondEnds) {
-            Return(c);
+        if (e.cameraWorkX) {
+            // (the game's own keeping across, its copy put back after: not kept in at all, or first kept 64 nearer the
+            // middle, inside the game's own ends, so that its keeping changes nothing)
+            if (modes::CameraAt().beyondEnds) {
+                c.pc = e.keptAcross;
+                return true;
+            }
+            if (g_play) {
+                const int x = Word(camera + e.cameraWorkX);
+                const int left = Word(camera + e.cameraLeft) + kSide, right = Word(camera + e.cameraRight) - kSide;
+                SetRam16(camera + e.cameraWorkX, static_cast<uint16_t>(std::clamp(x, left, std::max(left, right))));
+            }
+            return false;
+        }
+        // (where the stages each keep their own camera, the stage's code goes on after the piece that keeps it)
+        uint32_t after = 0;
+        for (const Engine::KeepCameraPlace &place : e.keepCameraPlaces) {
+            if (place.at == c.pc) {
+                after = place.after;
+            }
+        }
+        const auto done = [&] {
+            if (after) {
+                c.pc = after;
+            } else {
+                Return(c);
+            }
             return true;
+        };
+        if (modes::CameraAt().beyondEnds) {
+            return done();
         }
         if (!g_play) {
             return false;
@@ -278,8 +318,17 @@ namespace {
         const int y = Word(camera + e.cameraY);
         const int top = Word(camera + e.cameraTop), bottom = Word(camera + e.cameraTop + 2);
         SetRam16(camera + e.cameraY, static_cast<uint16_t>(std::clamp(y, top, std::max(top, bottom))));
-        Return(c);
-        return true;
+        return done();
+    }
+
+    // The game's own keeping of the camera's copy down (with cameraWorkY): not done for a mode's camera wanted beyond
+    // its ends (down, the wide picture keeps the game's ends)
+    bool KeepCameraDown(M68K &c) {
+        if (modes::CameraAt().beyondEnds) {
+            c.pc = e.keptDown;
+            return true;
+        }
+        return false;
     }
 
     // A character (A6) kept inside the picture of the plane it stands in: between 0x55 and 0x1AB on from the plane's
@@ -366,6 +415,14 @@ int WideStage() {
     return g_side + g_shift;
 }
 
+// The camera's place a frame ago, which the picture is drawn from (it is a frame behind), in a save state: a frame
+// put back (a save state, online play's rollback) is drawn, and its players kept in, as it was the first time
+void WidescreenState(Archive &ar) {
+    if (ar.version == 0 || ar.version >= 8) { // (a save state from before has none)
+        ar.Pod(g_cameraBefore);
+    }
+}
+
 void WidescreenBeforeFrame(Machine &machine) {
     const int camera = Word(e.cameraRecord() + e.cameraX), shown = g_cameraBefore;
     g_cameraBefore = camera;
@@ -396,7 +453,15 @@ void WideForPort(Machine &) {
 
 void RegisterWidescreen(uint32_t keepCamera, uint32_t keepIn) {
     TheGame().widestPicture = [] { return Video::kWidth + (FeatureOn("widescreen") ? 2 * kSide : 0); };
-    AddHook(keepCamera, "KeepCamera", KeepCamera);
+    if (keepCamera) {
+        AddHook(keepCamera, "KeepCamera", KeepCamera);
+    }
+    for (const Engine::KeepCameraPlace &place : e.keepCameraPlaces) {
+        AddHook(place.at, "KeepCamera", KeepCamera);
+    }
+    if (e.keepCameraDown) {
+        AddHook(e.keepCameraDown, "KeepCameraDown", KeepCameraDown);
+    }
     AddHook(keepIn, "KeepIn", KeepIn);
     TheGame().features.push_back({"widescreen", "Display", "Widescreen",
                                   "Fights are shown and played in 16:9, with more of the stage on each side: the characters can go to "
@@ -452,9 +517,9 @@ namespace {
     bool InRom(uint32_t address) {
         return address >= e.romLow && address < e.romHigh && !(address & 1);
     }
-    constexpr uint32_t kFrameTime = 0x02, kFramePicture = 0x04;
     bool IsFrame(Machine &machine, uint32_t frame) {
-        return InRom(frame) && InRom(Read32(machine, frame + kFramePicture)) && (machine.Read16(frame + kFrameTime) & 0x7FFF) != 0;
+        return InRom(frame) && InRom(Read32(machine, frame + e.framePictureAt) & e.framePictureMask) &&
+               (machine.Read16(frame + e.frameTimeAt) & 0x7FFF) != 0;
     }
     // Where an animation of the character's starts (by its number in the menu: its word `character` is twice it)
     uint32_t AnimationAt(Machine &machine, int character, int group, int number) {
@@ -467,10 +532,10 @@ namespace {
         return IsFrame(machine, frame) ? frame : 0;
     }
     int FrameTime(Machine &machine, uint32_t frame) {
-        return machine.Read16(frame + kFrameTime) & 0x7FFF;
+        return machine.Read16(frame + e.frameTimeAt) & 0x7FFF;
     }
     uint32_t NextFrame(Machine &machine, uint32_t frame) {
-        const uint32_t next = machine.Read16(frame + kFrameTime) & 0x8000 ? Read32(machine, frame + e.frameBytes) : frame + e.frameBytes;
+        const uint32_t next = machine.Read16(frame + e.frameTimeAt) & 0x8000 ? Read32(machine, frame + e.frameBytes) : frame + e.frameBytes;
         return next == frame || !IsFrame(machine, next) ? 0 : next;
     }
     // A frame put in player 1's record as the game puts it (back to standing: the character's first animation, which is
@@ -528,31 +593,45 @@ namespace {
     // The camera's step (A6 its record): it goes the way the byte `cameraWay` says. In the viewer, after player 1 alone,
     // its own way of doing that; where a mode wants the camera (fight/battle.h, CameraWanted), there, and the game's step
     // not made.
-    bool CameraWay(M68K &c) {
-        if (g.on && !g.starting) {
+    bool g_downApart = false; // the camera's step moves it down in a piece of its own (RegisterModel)
+
+    // The camera's step, across (and down, unless that is a piece of its own) or down alone
+    bool CameraStep(M68K &c, bool across, bool down) {
+        if (across && g.on && !g.starting) {
             SetRam8(e.cameraWay, e.followsOne);
             if (e.cameraWayTwice) {
                 SetRam8(e.cameraWay + 2, e.followsOne);
             }
         }
+        if (down && !across && e.cameraWayDown && g.on && !g.starting) {
+            SetRam8(e.cameraWayDown, e.followsOne);
+        }
         const CameraWanted &wanted = modes::CameraAt();
         const uint32_t camera = c.a[6] & 0xFFFFFF;
-        if ((wanted.x >= 0 || wanted.y >= 0) && camera == e.cameraRecord()) {
+        const bool x = across && wanted.x >= 0, y = down && wanted.y >= 0;
+        if ((x || y) && camera == e.cameraRecord()) {
             // (either where it is wanted, the other where it is; kept between its ends unless wanted beyond them)
             const auto place = [&](uint32_t word, int at, uint32_t ends) {
                 const int low = Word(camera + ends), high = Word(camera + ends + 2);
                 SetRam16(camera + word, static_cast<uint16_t>(wanted.beyondEnds ? at : std::clamp(at, low, high)));
             };
-            if (wanted.x >= 0) {
-                place(e.cameraX, wanted.x, e.cameraLeft);
+            // (where the step works on a copy of its place, the copy: it is put back as the step ends)
+            if (x) {
+                place(e.cameraWorkX ? e.cameraWorkX : e.cameraX, wanted.x, e.cameraLeft);
             }
-            if (wanted.y >= 0) {
-                place(e.cameraY, wanted.y, e.cameraTop);
+            if (y) {
+                place(e.cameraWorkY ? e.cameraWorkY : e.cameraY, wanted.y, e.cameraTop);
             }
             Return(c);
             return true;
         }
         return false;
+    }
+    bool CameraWay(M68K &c) {
+        return CameraStep(c, true, !g_downApart);
+    }
+    bool CameraWayDown(M68K &c) {
+        return CameraStep(c, false, true);
     }
 } // namespace
 
@@ -621,7 +700,7 @@ void ModelState(Archive &ar) {
     }
 }
 
-void RegisterModel(uint32_t cameraWayAt, int largeLift) {
+void RegisterModel(uint32_t cameraWayAt, int largeLift, uint32_t cameraWayDownAt) {
     model::Description d;
     d.page = kModel;
     d.pageWords = "One character by itself, on a stage or on white or black, at any size, standing or going through any of its "
@@ -635,6 +714,13 @@ void RegisterModel(uint32_t cameraWayAt, int largeLift) {
     d.foregroundWords = "What the stage has in front of the fighters: in front of the character too, as in a fight, or behind it so "
                         "that all of it is seen. In front only at the character's own size, and not in the colour editor.";
     d.characters = e.characterNames;
+    if (!e.viewerOrder.empty()) {
+        d.characters.clear();
+        for (const int n : e.viewerOrder) {
+            d.characters.push_back(e.characterNames[static_cast<size_t>(n)]);
+        }
+        d.numbers = e.viewerOrder;
+    }
     d.stages = e.stageNames;
     d.start = [](Machine &machine) {
         colours::EndEditor();
@@ -663,6 +749,19 @@ void RegisterModel(uint32_t cameraWayAt, int largeLift) {
     d.spareFrame = [](Machine &) { SetRam8(e.clock, 0x99); };
     model::Register(d);
     AddHook(cameraWayAt, "CameraWay", CameraWay);
+    if (cameraWayDownAt) {
+        g_downApart = true;
+        AddHook(cameraWayDownAt, "CameraWayDown", CameraWayDown);
+    }
+    // The window's zoom (modes::Focus): where the fighter stands in the picture as the boxes are put there (AddBox),
+    // heights growing downwards; a tag-team game's point characters are the first two records
+    modes::Focus(
+        [](int player, int &x, int &y) {
+            const uint32_t camera = e.cameraRecord();
+            x = Word(Player(player) + e.x) - Word(camera + e.cameraX) - e.pictureLeft + WideStage();
+            y = Word(Player(player) + e.y) - Word(camera + e.cameraY) - 0x0F;
+        },
+        40, 136);
 }
 
 } // namespace cps2recomp::marvel

@@ -49,7 +49,7 @@ LEAVE_OUT := $(shell $(CFG) sources_leave_out $(GAME))
 PROGRAM := $(WORK)/program.bin
 ENTRIES := $(WORK)/entries.txt
 
-.PHONY: all configure port gen run record explore check check-blocks check-sound check-rewrites check-common launcher app clean
+.PHONY: all configure port gen run record explore check check-blocks check-sound check-rewrites check-rollback check-online check-common launcher app clean
 # (on macOS the app bundle too, which is what the player opens: a bundle left from an older build hides what
 # changed since)
 ifeq ($(shell uname -s)$(NO_APP),Darwin)
@@ -64,19 +64,26 @@ endif
 gen:
 	@mkdir -p $(GEN)
 	@$(CFG) --header $(GEN)/game_info.h $(GAME)
+	@# (the map of this program in the other set's is made again whenever the game's entries have grown since: one
+	@# made from a fresh tree's first few entries knows little of the other set's code, and a graft from it gives
+	@# the taken characters the wrong code, #230)
 	@if [ -f $(PROGRAM).extra ] && [ -f games/$(GAME)/graft.cfg ]; then \
 		mkdir -p $(WORK)/extra; \
 		ln -sf ../program.bin.extra $(WORK)/extra/program.bin; ln -sf ../program.bin.extra.data $(WORK)/extra/program.bin.data; \
-		[ -f $(WORK)/extra/portmap.txt ] || python3 $(CR)/tools/portmap.py --from $(WORK) --to $(WORK)/extra \
+		[ -f $(WORK)/extra/portmap.txt ] && [ ! $(WORK)/entries.txt -nt $(WORK)/extra/portmap.txt ] || \
+			python3 $(CR)/tools/portmap.py --from $(WORK) --to $(WORK)/extra \
 			--out $(WORK)/extra/portmap.txt --entries $(WORK)/extra/entries.txt 2>/dev/null; \
 		python3 $(CR)/tools/graft.py --spec games/$(GAME)/graft.cfg --work $(WORK) \
 			--base $(shell $(CFG) extra_base $(GAME)) --out $(GEN)/graft_data.h; \
+	elif [ -f games/$(GAME)/graft.cfg ] && [ ! -f $(GEN)/graft_data.h ]; then \
+		echo '#define GRAFT_NOT_YET 1 // (the first build: the extra set not read yet; tools/graft.py writes this file)' > $(GEN)/graft_data.h; \
 	fi
+	@region=$$($(CFG) region_at $(GAME)); if [ -n "$$region" ]; then printf '%X\n' $$((0x$$region + 6)); fi > $(GEN)/region_hooks.txt
 	@if [ -f $(PROGRAM) ]; then \
 		python3 $(CR)/tools/recomp.py --program $(PROGRAM) --entries $(ENTRIES) --out $(GEN) \
 			--limit $(shell $(CFG) code_end $(GAME)) --list $(WORK)/program.lst \
 			--guess $(WORK)/guessed.txt --data $(PROGRAM).data \
-			--hook-sources "$(HOOK_SOURCES)" --hook-skip "$(LEAVE_OUT)" --places games/$(GAME)/family.h --hooks $(GEN)/graft_data_hooks.txt; \
+			--hook-sources "$(HOOK_SOURCES)" --hook-skip "$(LEAVE_OUT)" --places games/$(GAME)/family.h --hooks $(GEN)/graft_data_hooks.txt:$(GEN)/region_hooks.txt; \
 	fi
 	@if [ -f $(PROGRAM).z80 ]; then \
 		python3 $(CR)/tools/recompz80.py --program $(PROGRAM).z80 --entries $(ENTRIES).z80 --out $(GEN) \
@@ -133,6 +140,14 @@ check-blocks: gen configure
 check-sound: port
 	@$(CR)/tools/check_sound.sh
 
+# What online play's rollback needs: frames put back and run again come out as the first time (tools/check_rollback.sh)
+check-rollback: port
+	@$(CR)/tools/check_rollback.sh $(FRAMES)
+
+# Online play between two copies of the game on this machine, over a bad connection made up (tools/check_online.sh)
+check-online: port
+	@$(CR)/tools/check_online.sh $(FRAMES)
+
 check-rewrites: port check-common
 	@games/$(GAME)/check_rewrites.sh
 
@@ -158,7 +173,8 @@ launcher: port
 	  -DROM_SAMPLES="$(shell $(CFG) samples $(GAME))" -DROM_KEY="$(shell $(CFG) key $(GAME))" \
 	  -DDISPLAY_SWITCHES="$(shell $(CFG) display $(GAME))" \
 	  -DPLAYERS="$(shell $(CFG) players $(GAME))" -DBUTTONS="$(shell $(CFG) buttons $(GAME))" \
-	  -DBOARD="$(shell $(CFG) board $(GAME))" -DCPS_B="$(shell $(CFG) cps_b $(GAME))" > /dev/null
+	  -DBOARD="$(shell $(CFG) board $(GAME))" -DCPS_B="$(shell $(CFG) cps_b $(GAME))" \
+	  -DOTHER_SET="$(shell $(CFG) other_set $(GAME))" > /dev/null
 	@cmake --build $(B)/launcher
 	@echo "built $(B)/$(GAME)-launcher"
 

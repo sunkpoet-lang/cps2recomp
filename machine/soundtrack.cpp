@@ -90,7 +90,7 @@ void Soundtrack::Request(uint8_t *shared, uint64_t frame) {
     memcpy(last.request, shared, sizeof(last.request));
     last.song = song;
     last.frames = 0;
-    if (!Replaced(song)) {
+    if (!Replaced(song) && !Taken(song)) {
         state.song = -1; // (the board's own)
         return;
     }
@@ -134,7 +134,7 @@ void Soundtrack::Frame() {
 void Soundtrack::Serialize(Archive &ar) {
     ar.Mark(0x534F4E47);
     ar.Pod(state);
-    if (ar.version == 0 || ar.version >= 8) { // (8: the last music asked for; before, none known)
+    if (ar.version == 0 || ar.version >= 11) { // (11, this fork: the last music asked for; before, none known)
         ar.Pod(last);
     } else {
         last = Last{};

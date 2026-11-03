@@ -7,11 +7,10 @@
 An unofficial native PC port of the arcade game *Ghouls'n Ghosts* (Capcom, 1988, CPS-1 board; *Daimakaimura* in
 Japan) for macOS, Linux (Steam Deck included) and Windows, made by static recompilation.
 
-> **A first port, with its sound (this fork).** The game as the board plays it, translated, on the toolkit's classic
-> CPS-1 board: the picture, the two buttons (fire and jump) and the board's FM music and effects, but no features of
-> its own yet. The sound plays the board's YM2151 with [ymfm](https://github.com/aaronsgiles/ymfm) (BSD-3-Clause,
-> `third_party/`): an emulator's code, which upstream does not take (CONTRIBUTING.md, rule 4), so it lives only in this
-> fork.
+> **Initial classic CPS-1 port, with sound.** The game's picture, controls and arcade music and effects run on the
+> toolkit's shared classic CPS-1 board. Board options and cheats are declared in `game.cfg`; there is no training
+> mode yet. The YM2151 uses [ymfm](https://github.com/aaronsgiles/ymfm), the BSD-3-Clause library listed in
+> [THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md). The OKI MSM6295 is implemented in `sound/okim6295.cpp`.
 
 **No game files are included.** You need your own copy of the game: the arcade ROM set `ghouls` (World), from a board
 you own. This project cannot help you get one.
@@ -54,11 +53,6 @@ The CPS-B-01 has the same registers as Street Fighter II's CPS-B-21, with no mul
 so there are no voices: the YM2151 plays the music and the effects. The DIP switches are as the boards left the
 factory (`dip` in game.cfg): 3 lives, difficulty 2, a bonus life at 30K, 60K and every 70K, continues allowed.
 
-Made-up play found 568 entries: 41,824 instructions translated, 51 left to the interpreter, 29 of them data a guess
-took for code. A run of 6,000 frames (the board's tests, the story, the first stage's graveyard with Arthur losing
-his armour) ran nothing in the interpreter, at 551 frames a second without a window; its sound starts with the game's
-first request as a game begins (the attract mode asks for none) and is the same, byte for byte, with run-ahead.
-
 **The Board page** (the in-game menu's, F1 or Esc, and the launcher's): the DIP switches by name, from game.cfg's
 `board_option_N` lines: difficulty (1 to 8), lives (3 to 6), the bonus life, continue and demo sound, each "As the
 board is set" unless chosen. The board reads them only as it starts, so a change takes effect after Reset (the menu's
@@ -71,3 +65,19 @@ Each can be switched any time; off, the game goes on as it was. The addresses we
 pokes from a save state; game.cfg says how.
 
 **Next.** Features of its own.
+
+## Reproducible checks
+
+`movies/smoke_play.txt` supplies 40,000 frames of input from reset. It exercises coin/start and gameplay;
+it is a smoke route, not a completed game. Ghouls finishes its board tests later than Street Fighter II;
+its first coin/start during those tests is ignored and the next pair starts play.
+
+```sh
+make GAME=ghouls check FRAMES=40000 MOVIE=games/ghouls/movies/smoke_play.txt
+make GAME=ghouls check-rollback FRAMES=12000
+make GAME=ghouls check-online FRAMES=6000
+```
+
+The online check uses two local peers and simulated packet delay/loss; it does not test Internet play.
+The classic sound program runs on the Z80. `check-sound`'s QSound high-level-driver comparison is not applicable.
+Windows is the tested platform for this contribution; macOS/Linux builds still need verification.

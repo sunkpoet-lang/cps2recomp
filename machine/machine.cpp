@@ -227,7 +227,7 @@ void Machine::RunLine() {
 
     RunSound(kSoundCyclesPerLine);
 
-    if (m_line >= Video::kFirstLine && m_line < Video::kFirstLine + Video::kHeight) {
+    if (drawing && m_line >= Video::kFirstLine && m_line < Video::kFirstLine + Video::kHeight) {
         const int row = m_line - Video::kFirstLine;
         video.RenderLine(row, &m_picture[static_cast<size_t>(row) * m_pictureWidth]);
     }
@@ -728,7 +728,12 @@ uint16_t Machine::ReadCps1(uint32_t address) {
         return static_cast<uint16_t>(address == 0x800144 ? product : product >> 16);
     }
     if (address >= 0x800140 && address < 0x800180) {
-        return 0xFFFF; // (this CPS-B has no multiplier or ID to read)
+        // (a chip with an ID gives it at its register, which some games check as they start: romset.h's Board; no
+        // multiplier, and nothing else, to read)
+        if (m_roms.board.idRegister && (address & 0x3E) == m_roms.board.idRegister) {
+            return m_roms.board.idValue;
+        }
+        return 0xFFFF;
     }
     Unmapped("read", address, cpu.pc);
     return 0xFFFF;
@@ -879,6 +884,27 @@ bool Machine::LeaveSoundRequest(const uint8_t request[16]) {
 
 // The classic CPS-1's Z80 map (as MAME's CPS-1 driver records it): ROM, a bank of it, its RAM, the YM2151, the OKI
 // and the 68000's two latches
+// Only the multiplier operands need trial side effects. RAM writes stay in the checker's overlay;
+// sound requests, video writes and other I/O are applied once by the reference interpreter.
+void Machine::BeginCheck() {
+    std::copy(cpsB, cpsB + 2, m_checkFactors);
+}
+void Machine::CheckWrite(uint32_t address, unsigned size, uint32_t value) {
+    if (!m_cps1) return;
+    const unsigned bytes = 1u << size;
+    for (unsigned i = 0; i < bytes; ++i) {
+        const uint32_t at = ((address + i) & 0xFFFFFF) & ~0x4000u;
+        if (at < 0x800140 || at >= 0x800144) continue;
+        const unsigned shift = (at & 1) ? 0 : 8;
+        auto &word = cpsB[(at - 0x800140) / 2];
+        const uint16_t byte = static_cast<uint8_t>(value >> (8 * (bytes - 1 - i)));
+        word = static_cast<uint16_t>((word & ~(0xFFu << shift)) | (byte << shift));
+    }
+}
+void Machine::EndCheck() {
+    std::copy(m_checkFactors, m_checkFactors + 2, cpsB);
+}
+
 uint8_t Machine::ReadClassic(uint16_t address) {
     if (address < 0x8000) {
         return m_roms.soundProgram[address];
@@ -985,13 +1011,13 @@ void Machine::Serialize(Archive &ar) {
         m_palettePending = false;
     }
     if (m_classic) {
-        if (ar.version == 0 || ar.version >= 9) { // (the classic CPS-1's sound: from version 9)
+        if (ar.version == 0 || ar.version >= 10) { // (the classic CPS-1's sound: from version 10)
             m_classic->Serialize(ar);
             ar.Pod(m_classicRam);
             ar.Pod(m_latch);
             ar.Pod(m_classicFraction);
         } else if (!ar.Saving()) {
-            // (a save state from when the classic CPS-1 had no sound: its sound side starts afresh, counted from here)
+            // (a save state older than the classic CPS-1's sound in it: its sound side starts afresh, counted from here)
             m_classic->Reset();
             memset(m_classicRam, 0, sizeof(m_classicRam));
             memset(m_latch, 0, sizeof(m_latch));

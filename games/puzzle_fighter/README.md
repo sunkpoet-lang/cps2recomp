@@ -15,8 +15,8 @@ a training mode.
 > please [report what you find](#feedback-and-contributing).
 
 **No game files are included.** You need your own copy of the game: the arcade ROM set `spf2t`
-(Europe, 960529) with its key file, from a board you own. **Only that version works**: the sets of
-other regions and revisions (`spf2tu`, `spf2xj`, `spf2ta`, `spf2th` and the rest) do not. This
+(Europe, 960529) with its key file, from a board you own. **Only `spf2t` and `spf2ta` (Asia,
+960529) work**: the other revisions (`spf2tu`, `spf2xj`, `spf2th` and the rest) do not. This
 project cannot help you get one.
 
 This project is not affiliated with, endorsed by, or sponsored by Capcom. *Super Puzzle Fighter II
@@ -48,7 +48,8 @@ the settings memory) is code written for this project, not an emulator
   launcher. Two more can be given a key or a button: all three punches at once, and all three kicks. In the collection
   it can have a layout of its own, apart from the other games'.
 - An in-game menu (Esc or `F1`; on a gamepad, the left stick's click or Start and Select together)
-  with the training mode, save states, speed, the cheats and every feature.
+  with the training mode, save states, speed (1/8 to 8x), the cheats,
+  every feature, and a Reset all options row.
 - **Rapid fire** (Game page): a button held down is pressed again and again, fifteen times a second, for the first
   button or for all of them; the first press is seen at once.
 - **Pure** plays exactly as the board does. **Enhanced** (the default) adds free play, pushing up to
@@ -72,9 +73,9 @@ the settings memory) is code written for this project, not an emulator
 - **A custom soundtrack**: your own music in place of the board's music, with the board's sound effects and voices:
   a folder of music plays as a playlist (in order or shuffled), or files named for the game's songs replace those
   songs. The `songs.txt` the game writes in the soundtrack folder names all 24 pieces
-  of its music (each character's theme, the title, the dojo, the intermission and the screens between matches). [How →](../../README.md#a-custom-soundtrack)
+  of its music (each character's theme, the title, the dojo, the intermission and the screens between matches). [How →](../../docs/SOUNDTRACK.md)
 - Your ROM set is only ever read. Settings, save states and the board's settings memory go in your
-  own user folder, or beside the launcher in [portable mode](../../README.md#portable-mode).
+  own user folder, or beside the launcher in [portable mode](../../docs/LAUNCHER.md#portable-mode).
 
 | | |
 | --- | --- |
@@ -109,7 +110,7 @@ stage). [docs/FEATURES.md](docs/FEATURES.md) has the whole list.
 
 The in-game menu's first row, "Alternative modes", has ways of playing and watching the game that the
 board does not have. Each has a page with a Start row and its own choices, and runs until another is
-started or the menu's Reset.
+started or the menu's Reset game.
 
 | Mode | What it does |
 | --- | --- |
@@ -133,6 +134,7 @@ The Display page (in the launcher and the in-game menu) says how the picture fit
 | --- | --- |
 | Scaling | Sharp (each pixel a crisp block), Whole pixels (every pixel the same whole number of the screen's pixels tall, a border round it), Smooth |
 | Picture shape | 4:3 (as the arcade's monitor showed it), Square pixels, Fill |
+| Shader | Off, or the picture through one of RetroArch's shaders: CRT (a curved arcade monitor), CRT Lottes, CRT Royale, CRT Guest, CRT Light, Scanlines (light, strong, OSSC or dark), xBRZ, ScaleFX, or Your own (a `.slangp` preset in the `shaders` folder beside the game's settings); the launcher chooses which of them the menu goes through |
 | Window size | 3x the board's 224 lines, or 2x to 6x |
 
 The first of each is the default, and how it has always been drawn. Full screen is on the launcher's
@@ -196,7 +198,7 @@ the set you changed**, anywhere: arcade, versus, training. Your gem colours are 
 | Windows | `%APPDATA%\Super Puzzle Fighter II Turbo\palettes` (paste it into Explorer's address bar; it is the `AppData\Roaming` folder in your user folder) |
 | macOS | `~/Library/Application Support/Super Puzzle Fighter II Turbo/palettes` |
 | Linux, SteamOS | `~/.local/share/Super Puzzle Fighter II Turbo/palettes` |
-| [Portable mode](../../README.md#portable-mode) | `user/Super Puzzle Fighter II Turbo/palettes` beside the launcher |
+| [Portable mode](../../docs/LAUNCHER.md#portable-mode) | `user/Super Puzzle Fighter II Turbo/palettes` beside the launcher |
 
 You can write or share them by hand: "Write the game's colours" (on the colour editor's page of the
 menu) puts every character's own colours and the gems' in `palettes/original` to start from, each set
@@ -215,17 +217,18 @@ nothing until there are files), off in Pure.
 
 ## What you need
 
-- The ROM set `spf2t` (*Super Puzzle Fighter II Turbo*, Europe 960529): `spf2t.zip` or a folder
-  with the set's files, including `spf2t.key`. The launcher checks every file by checksum and tells
-  you which is missing or different. Sets of other regions and revisions are refused: the port is
-  made from this one version's program, and its features use addresses found in it.
+- The ROM set `spf2t` (*Super Puzzle Fighter II Turbo*, Europe 960529): `spf2t.zip` or a folder with
+  the set's files, including `spf2t.key`. The launcher checks every file by checksum and tells you
+  which is missing or different. The same release's other sets work too, each as the board plays in
+  its region: `spf2ta` (Asia 960529). Other revisions are refused: the port is made from this
+  program, and its features use addresses found in it.
 - One of: macOS 13 or later (Apple silicon or Intel); Linux x86_64 or SteamOS; Windows 10 or 11,
   64-bit.
 - A gamepad or stick is recommended.
 
 ## Playing
 
-Super Puzzle Fighter II Turbo comes with [CPS-2 Recomp](../../README.md#playing): download it for your system from the
+Super Puzzle Fighter II Turbo comes with [CPS-2 Recomp](../../README.md#getting-started): download it for your system from the
 [releases page](https://github.com/tmcleroy/cps2recomp/releases), open its launcher, and show it your ROM
 set (drop `spf2t.zip` or its folder on the window, or choose the folder you keep your sets in: it finds each
 game's by name). Then press **Play** beside Super Puzzle Fighter II Turbo, or on its own page, which has its Display switches and

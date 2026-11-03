@@ -10,6 +10,10 @@ if (NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release)
 endif ()
 
+# The release's version (VERSION): online play's two copies must have the same (port/netplay.cpp)
+file(STRINGS "${CMAKE_SOURCE_DIR}/VERSION" RECOMP_VERSION LIMIT_COUNT 1)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/VERSION")
+
 # Game selection: the game id names a directory under games/ and the generated code under work/
 set(GAME "vampire_savior" CACHE STRING "Game id (directory under games/)")
 set(GAME_DIR "${CMAKE_SOURCE_DIR}/../games/${GAME}" CACHE PATH "The game's directory (game.cfg, src/)")
@@ -38,7 +42,7 @@ if (GAME_BOARD MATCHES "neogeo")
         set(NEOGEO_GAME_SOURCES runtime/no_game.cpp)
     endif ()
     add_executable(${GAME} port/neogeo_main.cpp port/neogeo_port.cpp port/neogeo_window.cpp port/present.cpp port/menu.cpp
-        port/hud.cpp recomp-common/menu.cpp recomp-common/settings.cpp runtime/game.cpp runtime/neogeo_game.cpp
+        port/hud.cpp recomp-common/menu.cpp recomp-common/menubar.cpp recomp-common/settings.cpp runtime/game.cpp runtime/neogeo_game.cpp
         machine/neogeo.cpp machine/neogeo_sound.cpp video/neogeo_video.cpp machine/m68k.cpp sound/z80.cpp machine/romset.cpp
         machine/kabuki.cpp machine/cps2crypt.cpp runtime/no_blocks.cpp runtime/no_z80_blocks.cpp ${YMFM_OPN}
         ${NEOGEO_GAME_SOURCES})
@@ -127,15 +131,27 @@ FetchContent_MakeAvailable(gekkonet)
 # (the version both players of an online match must have: VERSION's)
 file(STRINGS "${CMAKE_SOURCE_DIR}/VERSION" CPS2RECOMP_VERSION LIMIT_COUNT 1)
 
-set(PORT_SOURCES port/main.cpp port/online.cpp port/frontend_sdl.cpp port/present.cpp port/menu.cpp port/hud.cpp port/soundtrack.cpp port/decoders.cpp recomp-common/menu.cpp recomp-common/menubar.cpp recomp-common/settings.cpp runtime/game.cpp runtime/board.cpp runtime/spare.cpp fight/frames.cpp fight/training.cpp fight/colours.cpp fight/colour_editor.cpp fight/battle.cpp fight/alternative.cpp fight/session.cpp fight/tag.cpp fight/marvel.cpp beat/modes.cpp beat/model.cpp model/model.cpp ${GAME_SOURCES})
+set(PORT_SOURCES port/main.cpp port/online.cpp port/frontend_sdl.cpp port/present.cpp port/shading.cpp port/zoom.cpp port/menu.cpp port/hud.cpp port/touch.cpp port/soundtrack.cpp port/netplay.cpp recomp-common/launcher/src/online.cpp recomp-common/launcher/src/run_program.cpp port/decoders.cpp recomp-common/menu.cpp recomp-common/menubar.cpp recomp-common/settings.cpp runtime/game.cpp runtime/board.cpp runtime/spare.cpp runtime/guest.cpp fight/frames.cpp fight/training.cpp fight/colours.cpp fight/colour_editor.cpp fight/battle.cpp fight/alternative.cpp fight/session.cpp fight/tag.cpp fight/marvel.cpp fight/guest_stages.cpp beat/modes.cpp beat/model.cpp model/model.cpp ${GAME_SOURCES})
 
 # (the sound files' decoders, third_party/, are other projects' code, compiled as they are)
 set_source_files_properties(port/decoders.cpp PROPERTIES COMPILE_OPTIONS "-w")
-# (and ymfm's YM2151, this fork's sound of the classic CPS-1 board)
+# (ymfm's published YM2151 implementation for the classic CPS-1 sound board)
 set_source_files_properties(third_party/ymfm_opm.cpp PROPERTIES COMPILE_OPTIONS "-w")
 
-# The game, on cps2recomp's own machine (machine/). No emulator is compiled or linked into it.
-add_executable(${GAME} ${PORT_SOURCES} ${MACHINE_SOURCES} ${GEN_SOURCES} ${GEN_Z80_SOURCES})
+# (macOS: handing the front to the launcher, port/front_macos.mm)
+if (APPLE)
+    enable_language(OBJCXX)
+    list(APPEND PORT_SOURCES port/front_macos.mm)
+endif ()
+
+# The game on cps2recomp's machine (machine/); classic CPS-1 uses the credited ymfm YM2151 library.
+# (Android: a library, which the game's activity loads and calls the main of: android/, tools/release/android.sh)
+if (ANDROID)
+    list(APPEND PORT_SOURCES port/android.cpp)
+    add_library(${GAME} SHARED ${PORT_SOURCES} ${MACHINE_SOURCES} ${GEN_SOURCES} ${GEN_Z80_SOURCES})
+else ()
+    add_executable(${GAME} ${PORT_SOURCES} ${MACHINE_SOURCES} ${GEN_SOURCES} ${GEN_Z80_SOURCES})
+endif ()
 # The check build ('make check-blocks'): the same, with every translated block run beside the interpreter
 # and compared (runtime/recomp.cpp)
 add_executable(${GAME}-check EXCLUDE_FROM_ALL ${PORT_SOURCES} ${MACHINE_SOURCES} ${GEN_SOURCES} ${GEN_Z80_SOURCES})
@@ -155,9 +171,19 @@ endif ()
 foreach (target ${GAME} ${GAME}-check)
     target_include_directories(${target} PRIVATE runtime port machine fight beat model "${WORK_DIR}/gen" "${GAME_DIR}" ${GAME_INCLUDES})
     target_link_libraries(${target} PRIVATE SDL3::SDL3 ZLIB::ZLIB GekkoNet)
+    if (APPLE)
+        target_link_libraries(${target} PRIVATE "-framework AppKit")
+    endif ()
+    if (ANDROID)
+        target_link_libraries(${target} PRIVATE log)
+    endif ()
     if (WIN32)
-        target_link_libraries(${target} PRIVATE ws2_32)
+        target_link_libraries(${target} PRIVATE ws2_32 iphlpapi) # (online play's socket, and this machine's addresses)
     endif ()
     target_compile_definitions(${target} PRIVATE CPS2RECOMP_VERSION="${CPS2RECOMP_VERSION}")
     target_compile_options(${target} PRIVATE -Wall -Wextra -Wno-unused-parameter -Wno-unused-label -Wno-unused-variable -Wno-parentheses-equality)
+    # (a char is signed, as on x86 and Apple's ARM, also on Linux ARM64, whose own is unsigned: every build does the
+    # same sums)
+    target_compile_options(${target} PRIVATE -fsigned-char)
+    target_compile_definitions(${target} PRIVATE RECOMP_VERSION="${RECOMP_VERSION}")
 endforeach ()

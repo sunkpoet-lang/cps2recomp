@@ -6,16 +6,18 @@ every platform by hand.
 
 ## What a release is
 
-Three archives, their checksums and the launcher's three manifests, as a GitHub release of a tag. Nothing else:
-a player sees the three downloads.
+Four archives and the Android app, their checksums and the launcher's four manifests, as a GitHub release of a tag. Nothing else:
+a player sees the four downloads.
 
 | File | For |
 | --- | --- |
 | `CPS2Recomp-macOS.zip` | macOS 13 or later, Apple silicon and Intel (one app, "CPS-2 Recomp"; signed ad hoc, not notarized) |
 | `CPS2Recomp-linux-x86_64.tar.gz` | Linux x86_64, Steam Deck, Steam Machine |
+| `CPS2Recomp-linux-arm64.tar.gz` | Linux ARM64 (aarch64) |
 | `CPS2Recomp-windows-x64.zip` | Windows 10 and 11, 64-bit |
+| `CPS2Recomp-android.apk` | Android 9 or later, 64-bit ARM (every game and the launcher in one app; signed with the release key) |
 | `SHA256SUMS.txt` | |
-| `update-macos.txt`, `update-linux-x86_64.txt`, `update-windows-x64.txt` | The launcher's updates: each system's manifest |
+| `update-macos.txt`, `update-linux-x86_64.txt`, `update-linux-arm64.txt`, `update-windows-x64.txt` | The launcher's updates: each system's manifest |
 
 The release's text is `tools/release/notes.sh`'s. At the top, the paragraph the version's section of `CHANGELOG.md`
 begins with: a few sentences on what is in the release, before the section's list (the script stops if there is
@@ -50,9 +52,10 @@ code is not part of that source: it is made from the player's own ROM sets by th
    version, and begin the section with a paragraph saying what is in the release (the release's page opens with it).
    On a Mac with every ROM set in `rom/<id>/` and every game's code found (`make GAME=<id> explore` once in the
    tree, about seven minutes a game; or `tools/seed_entries.sh <another tree>`, which takes what that tree found),
-   `tools/release/checks.sh` passes (about 45 minutes): for every game its build, `check`, `check-blocks`,
-   `check-release` over its ladder movie (40,000 frames; Puzzle Fighter's 66,000), `check-rewrites` and
-   `check-widescreen` where it has them, then `make check`. It stops at once if a game's code has not been
+   `tools/release/checks.sh` passes (about 40 minutes, three games at once: `JOBS`): for every game its build,
+   `check`, `check-blocks`, `check-release` over its ladder movie (40,000 frames; Puzzle Fighter's 66,000),
+   `check-rewrites` and `check-widescreen` where it has them, `check-rollback` and `check-online` (what online play
+   needs of every game: [TOOLKIT.md](TOOLKIT.md), Online play), then `make check`. It stops at once if a game's code has not been
    found: a tree that has not, translating from guesses, fails `check` and `check-blocks` for that alone. Put
    its lines in the pull request. Merge it.
 2. On `main`: `git tag -a vX.Y.Z -m "X.Y.Z"` and `git push origin vX.Y.Z`.
@@ -61,19 +64,25 @@ code is not part of that source: it is made from the player's own ROM sets by th
    no display: the proof the tag compiles everywhere). It then makes a **draft** release whose notes are the
    version's section of the changelog, with no files. A tag with `-beta` or `-rc` is marked pre-release.
 4. On a Mac with Docker and every ROM set, at the tag (the same source as the merged pull request, so its
-   checks stand): `tools/release/all.sh`, which writes the three archives and `SHA256SUMS.txt` in `build/release/`.
+   checks stand): `tools/release/all.sh`, which writes the four archives, the Android APK and `SHA256SUMS.txt` in `build/release/`.
 5. Each archive's game programs are run over their ladder movies with `--hash-picture` on their systems (macOS
-   both halves, Linux in a container, Windows under Wine): the same picture hashes as the Mac's build. A person
+   both halves, Linux x86_64 and ARM64 in
+   containers, Windows under Wine): the same picture hashes as the Mac's build. A person
    plays each archive on its system (picture, sound, a gamepad, the launcher's pages, a save state, training
    mode).
-6. `gh release upload vX.Y.Z build/release/CPS2Recomp-* build/release/SHA256SUMS.txt build/release/update-*.txt`
-   (seven files), then publish the draft. A published release's files are never replaced: a fix is a new
+6. `gh release upload vX.Y.Z build/release/CPS2Recomp-*.{zip,tar.gz,apk} build/release/SHA256SUMS.txt build/release/update-*.txt`
+   (ten files; never the `-with-roms-DO-NOT-SHARE` APK), then publish the draft. A published release's files are never replaced: a fix is a new
    version. Publishing is what offers it to every launcher that checks, so the archives are played (step 5)
    first.
 
+The APK is always part of a release. `tools/release/all.sh` builds it with `RELEASE=1`, which needs the signing key
+(`~/.config/cps2recomp/android-signing.env`): a published APK has to carry the same key every time or it won't
+install over the one before, so keep that key and its backup safe.
+
 ## A new game
 
-A game is a folder in `games/` (the toolkit's [TOOLKIT.md](TOOLKIT.md) says what goes in it). Before it is
+A game is a folder in `games/` (the toolkit's [TOOLKIT.md](TOOLKIT.md) says what goes in it, and what online play
+needs of it: everything its sources keep between frames in its save state; `check-rollback` and `check-online` pass). Before it is
 committed here, the repository being public: the same legal audit as the others (nothing from the game, the key
 from the player's own set, its names and pictures used only to say what it works with), every source file with
 its licence line (`make audit`), and its README in `games/<id>/` with the main README's table of games. The

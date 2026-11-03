@@ -20,6 +20,7 @@
 #include "alternative.h"
 #include "battle.h"
 #include "ssf2t.h"
+#include "state.h"
 
 #include <algorithm>
 
@@ -323,6 +324,14 @@ int WideStage() {
     return g_side + g_shift;
 }
 
+// The camera's place a frame ago, which the picture is drawn from (it is a frame behind), in a save state: a frame
+// put back (a save state, online play's rollback) is drawn, and its players kept in, as it was the first time
+void WidescreenState(Archive &ar) {
+    if (ar.version == 0 || ar.version >= 8) { // (a save state from before has none)
+        ar.Pod(g_cameraBefore);
+    }
+}
+
 void WidescreenBeforeFrame(Machine &machine) {
     const int camera = static_cast<int16_t>(Ram16(kCameraX)), shown = g_cameraBefore;
     g_cameraBefore = camera;
@@ -352,7 +361,18 @@ void WideForPort(Machine &) {
     g_shift = g_kept.shift;
 }
 
+namespace {
+    using namespace ssf2t;
+    // Where a player's fighter stands in the picture, for the window's zoom (fight/alternative.h, modes::Focus): the
+    // middle of its feet, the wide picture's columns counted
+    void FocusPlace(int player, int &x, int &y) {
+        x = static_cast<int16_t>(Ram16(Player(player) + kX)) - static_cast<int16_t>(Ram16(kCameraX)) + WideStage();
+        y = 239 - (static_cast<int16_t>(Ram16(Player(player) + kY)) - static_cast<int16_t>(Ram16(kCameraY)));
+    }
+} // namespace
+
 void RegisterWidescreen() {
+    modes::Focus(FocusPlace, 40, 104);
     TheGame().widestPicture = [] { return Video::kWidth + (FeatureOn("widescreen") ? 2 * kSide : 0); };
     AddRewrite(0x0CC4E4, "CameraAcross", CameraAcross, kFreeFlags, 418);
     AddRewrite(0x0CC630, "CameraUp", CameraUp, kFreeFlags, 322);

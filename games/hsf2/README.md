@@ -5,90 +5,211 @@
 > download and play.
 
 An unofficial native PC port of the arcade game *Hyper Street Fighter II: The Anniversary Edition* (Capcom, 2004,
-CPS-2 board) for macOS, Linux (Steam Deck included) and Windows, made by static recompilation.
+CPS-2 board) for macOS, Linux (Steam Deck included) and Windows, made by static recompilation. Every character can be
+played as they were in each game of the series: World Warrior, Champion Edition, Hyper Fighting, Super and Super
+Turbo, against each other. It is made from the USA 040202 set, the one Fightcade plays.
 
-> **Super Turbo's modes (this fork).** The game as the board plays it, translated, with most of what Super Turbo has
-> here, from Super Turbo's own sources: training mode and its dummy, hit boxes and frame data, attract mode, the stage
-> viewer, survival, endless battle and ring out, free play, straight to the title, the Board and the Cheats pages,
-> and its music for a custom soundtrack with F12. Not yet: widescreen, the tag team battle's tag style, the model
-> viewer and custom colours.
+It has everything the other fighting games here have: a full **training mode** (hit boxes, frame data and a frame
+meter, input display, combo and stun readouts, a dummy that records, replays and guards), the **alternative modes**
+(attract mode, the stage and model viewers, survival, endless battle, ring out, a tag team battle), **widescreen**, **custom colours**
+with a colour editor, the **hidden character** with no code (Akuma), and the features every
+game shares: free play, straight to the title, the board's operator settings, cheats, save states, run-ahead, arcade
+timing, a custom soundtrack.
 
-**No game files are included.** You need your own copy of the game: the arcade ROM set `hsf2j` (Japan, 040202) with
-its key file, and its parent set `hsf2`, which holds the graphics and the sound, from a board you own. This project
-cannot help you get one.
+> **Beta.** The game plays from start to ending and its code is checked instruction by instruction, but it has
+> been played on few machines and controllers yet. Expect rough edges, and please
+> [report what you find](#feedback-and-contributing).
 
-This project is not affiliated with, endorsed by, or sponsored by Capcom. *Street Fighter* is a trademark of Capcom
-Co., Ltd.
+**No game files are included.** You need your own copy of the game: the arcade ROM set `hsf2` (USA, 040202) with its
+key file, from a board you own. **Only the sets named below work.** This project cannot help you get one.
+
+This project is not affiliated with, endorsed by, or sponsored by Capcom. *Street Fighter* is a trademark of
+Capcom Co., Ltd.
+
+![The title screen](../../docs/screenshots/hsf2/title.png)
+
+![Ryu against Ken in Fei Long's garden](../../docs/screenshots/hsf2/fight.png)
+
+## What it is
+
+The game's 68000 program is translated ahead of time into C++ and compiled into the port, and so is its sound
+CPU's (Capcom's sound driver 1.06b). The program grew out of Super Turbo's, and the port builds on this collection's
+Super Turbo: its routines were lined up with Super Turbo's instruction by instruction to carry what was found there
+over. The routines widescreen changes (the camera's place across and up, and keeping the
+players inside the picture) are rewritten by hand as readable C++, each checked call by call against the game's own
+code. What the program expects of the board (its video, the QSound chip, the sound CPU and its registers, the settings
+memory) is code written for this project, not an emulator. Every translated block is checked against an interpreter of
+the same program ([how it was made](PROGRESS.md)).
+
+- Plays with a keyboard, a gamepad or an arcade stick; every key and button can be changed, for each player, in the
+  launcher. Two more can be given a key or a button: all three punches at once, and all three kicks. In the collection
+  it can have a layout of its own, apart from the other games'.
+- An in-game menu (Esc or `F1`; on a gamepad, the left stick's click or Start and Select together) with the
+  training mode and the other modes, save states, speed (1/8 to 8x), the cheats,
+  every feature, and a Reset all options row.
+- **Zoom**: hold the left stick's click and press the left shoulder to zoom in on player 1's fighter, the right
+  shoulder for player 2's (keyboard: hold Left Shift and press Q or E). Each press for the same player goes a size
+  up, 1.25x, 1.5x, 1.75x and 2x (the model viewer's sizes: at 2x the top of a tall fighter is off the screen), then
+  back to the whole picture; a press for the other player looks at that one instead. The fighter is kept in the
+  middle all the while (past the stage's ends is black); with the click (or Left Shift) still held, the d-pad or
+  the stick (the arrows) moves the camera to frame it as you like, until the zoom is off or looks at the other fighter. The size eases from one
+  to the next, it is said at the bottom for a few seconds, and outside a fight the picture is whole again. The
+  game's own health bars are zoomed with it; the port's own text (a mode's score, the training display) is not.
+  With the left stick's click held, the right stick's click (keyboard: Left Shift and W) keeps **both fighters** in
+  the picture instead: the camera as close as shows both whole, tight when they are close and wide when they are
+  apart (2x at most, the whole picture at least), kept inside the stage; again for the whole picture. The left
+  stick's click alone still opens the menu, when it is let go.
+- **Rapid fire** (Game page): a button held down is pressed again and again, fifteen times a second, for the first
+  button or for all of them; the first press is seen at once.
+- **Pure** plays exactly as the board does. **Enhanced** (the default) adds free play and your own
+  [character colours](#custom-colours). Every other feature is a switch of its own.
+- **Free play** is the game's own: a coin mode its test menu never offers, which the feature sets as the board's
+  start would. The title says FREE PLAY, and Start goes straight to the choice of speed, version and character.
+- **Straight to the title** (Game page): at a start or a reset, everything before the title (the board's start,
+  the warning, the anniversary's mark and the introduction) runs unseen; the picture comes back with the title.
+- The board's operator settings (difficulty, game speed, rounds, continue, demo sound) on the Board page (launcher's Features,
+  in-game menu), each as the board is set unless you choose; or the game's own test menu from the in-game menu.
+- Cheats: no damage (each player), one-hit knockouts, infinite time.
+- **Hidden character** (Game page): Akuma with no code. Press the three punches at once as you choose a Super Turbo
+  character. (His face and name on the panel are blank, as when the game's own code gives him.)
+- **Arcade timing** (Game page, off unless chosen): the processor run as on the arcade board, so the game slows
+  down where and as much as the board does. [More →](../../docs/TIMING.md)
+- **Run-ahead** (Game page): what you press seen a frame or two sooner than on the board, with the game running
+  exactly as without it.
+- **A custom soundtrack**: your own music in place of the board's, with the board's sound effects and voices: a
+  folder of music plays as a playlist (in order or shuffled), or files named for the game's songs replace those
+  songs. [The list of its songs](../../docs/SONGS.md#hyper-street-fighter-ii) names the music: each stage's
+  tune and its faster version once a fighter's health is low (`ryu_later`), the final fight, the introduction and
+  title, player select, versus, the winner's, continue, the ranking, Ryu's ending and the staff roll (Super Turbo's
+  music, whichever versions fight).
+  [How →](../../docs/SOUNDTRACK.md)
+- Your ROM set is only ever read. Settings, save states and the board's settings memory go in your own user folder.
+
+## Training mode
+
+"Alternative modes" at the top of the in-game menu has a Training mode page: Start goes straight to the choice with
+two players (player 1's controls choose for both: the speed, then each one's version and character) and into a fight with no clock that nobody loses, and
+the page holds the aids below.
+
+| Feature | What it does |
+| --- | --- |
+| Hit boxes | The boxes the game itself tests: where a player can be hit (blue), attacks (red; orange for things thrown), pushing boxes (green) |
+| Frame data and frame meter | Startup, active and recovery of each move and the advantage after a hit or a guarded hit, counted in the game's own steps; a row of cells for each player, one a step; optionally every move written to `frame_data.csv` beside the settings |
+| Input display | What each player presses and for how long, in numpad notation from the player's side |
+| Combo readout | Hits and damage of a combo, the round's best |
+| Stun readout | How much stun each player has built up, against how much stuns them (more each time they have been stunned) |
+| Health and gauge refills | Health comes back when a player has not been hit for a moment; both super combo gauges kept full |
+| The dummy | Stands, crouches, jumps; guards (always, after a hit, at random); records and replays in three slots (one, or any at random), and can answer with a recording after guarding or being hit |
+| Start over | The round as it began, in the middle or a corner, sides swapped or not (Backspace, or a gamepad's left shoulder) |
+| Stage | Any of the sixteen stages, or the game's own choice |
+| Stop, step, slow | Stop the game, go on a frame at a time, or play at a half, a quarter or an eighth of the speed |
+
+## Alternative modes
+
+The in-game menu's first row, "Alternative modes", has ways of playing and watching the game that the board does not
+have. Each has a page with a Start row and its own choices, and runs until another is started or the menu's Reset game.
+
+| Mode | What it does |
+| --- | --- |
+| Training mode | A fight with no clock that nobody loses, and the aids above |
+| Attract mode | The game's own show on a loop: everything, the introduction and the title only, or the demonstration fight over and over |
+| Stage viewer | Any of the sixteen stages with nobody on it and no panel, scrolled with the stick or by itself, with any tune; "Infinite" scrolls through every stage in turn |
+| Model viewer | One character by itself (its Super Turbo version), on a stage or on plain white or black, from a quarter of its size to 25 times. It stands and moves with your controls, or goes through any of its animations (named A0, A12... as the game's own list numbers them; left and right step through them), over and over or all of them one after another (Play all), at full speed or in slow motion |
+| Colour editor | Change a character's colours while you watch: [custom colours](#custom-colours) |
+| Survival | One computer opponent after another on the health you have left. How many can you beat? |
+| Endless battle | Two fighters the game plays, for as long as you like, with no clock, on one stage, on stages that fade one into another, or on a floor that scrolls through them all. Touch the controls to take a fighter over |
+| Ring out | No knock-outs. Knock your opponent over the end of the stage (it is flung into the air and falls through the floor), then jump down after it and land on the next stage. The CPU plays it as a ring out, not for damage: it walks you towards an end, knocks you over it when your back is to it, and keeps off its own end, getting out of a corner with a jump over you |
+| Tag team battle | Two teams of two or three, chosen on its page, all on one stage. Team 2 is the CPU (its difficulty chosen on the page), or player 2; with "Tag team" on the same page each fighter is a person's own: co-op (players 1 and 2 against the CPU's team) or 2 vs 2 for four players, a label under the bars saying who is on. **Tag style**, the default: each fighter keeps a bar of its own and you tag the next one in with a gamepad's left trigger (or Start) whenever yours can act: yours flies off the screen, and the next one jumps in from that side with a jump attack that can hit. When a bar empties, that fighter is knocked down and lies there for two seconds, not to be hit, and the next one jumps in; resting fighters get back some health, the super combo gauge carries over, the others' health is listed under the bars, one round decides it, and a time over goes to the team with more health in all. The CPU's team tags too, as a person would: when the one on is low and a partner has more (or has rested), best while you are down or far off, never in the middle of your combo. "Style: Knock-out" plays one fighter of each team at a time instead: the one knocked out is out and the next of that team comes on with a full bar, the winner staying on with the health it has left |
+
+## Widescreen
+
+A switch on the launcher's first page, under "Full screen" (and on the in-game menu's Display page). Fights are shown
+and played in 16:9: the picture is 512 columns wide where the board's is 384, at the same height and with everything
+the same size, so there is a third more of the stage in view.
+
+It is **off unless you switch it on**, in every preset, because it changes how the game plays:
+
+- The players can go to the wide picture's edges, so they can stand further apart than on the board. The stage's own
+  ends are where they were.
+- The camera stops 64 short of where it did, so that the picture ends where the stage does.
+- The bars and the gauges stay in the middle. Everything that is not a fight keeps the board's 4:3.
+
+With it off the game is exactly the board's.
+
+**Invisible walls**, on the Display page, keeps the 16:9 picture and plays the game exactly as the board does: the
+players are stopped where the board's picture ends, by walls that are not seen, and the camera goes as far as the
+board's. Near a stage's end the view stays on the stage, so the play area is then to one side of the wide picture. The
+game's memory is the same as with widescreen off, frame for frame (`make GAME=hsf2 check-widescreen` compares it along
+the ladder).
+
+## Custom colours
+
+Give any character colours of your own: change them in the game's colour editor (Alternative modes), or bring files
+someone else made.
+
+- **The colour editor** shows the character with a panel at the right, worked with player 1's controls: the
+  character, background, size and animation; the **set** (by what chooses a Super Turbo character: each of the six
+  buttons, Start, a button held); the **line** (one of the set's five palettes); each colour's red,
+  green and blue; random colours; saving a set to the character's library and loading it into any set. Changes show
+  at once and are saved as you go. To play in them, choose the character the way of the set you changed.
+- **Files**: `palettes/<Character>.txt` in the game's data folder (one section a set, a line of 16 colours a
+  palette), or a `hs2u.04` changed with PalMod. They are the Super Turbo version's colours. "Write the game's colours" writes the game's own to start from.
+
+## The board's settings
+
+The Board page has the settings of the test menu's System Configuration that change the game, each "As the board is
+set" unless chosen. A choice is what the test menu would have set; the board's settings memory itself is not changed,
+and the test menu shows the board's own values.
+
+| Setting | Choices | The board's own (a new board) |
+| --- | --- | --- |
+| Difficulty | 1 (easiest) to 8 (hardest) | 4 (medium) |
+| Game speed | Turbo 0 to 3, Free select | Free select |
+| Max round | 2, 4, 6 rounds | 4 rounds |
+| Continue | Off, On | On |
+| Demo sound | Off, On | On |
 
 ## What you need
 
-- The ROM set `hsf2j` (*Hyper Street Fighter II: The Anniversary Edition*, Japan 040202): `hsf2j.zip` with
-  `hsf2j.key`, and beside it the parent set `hsf2.zip` (or one folder with all the files). The launcher checks every
-  file by checksum; other regions and revisions are refused.
-- One of: macOS 13 or later; Linux x86_64 or SteamOS; Windows 10 or 11, 64-bit.
+- The ROM set `hsf2` (*Hyper Street Fighter II: The Anniversary Edition*, USA 040202): `hsf2.zip` or a folder with
+  the set's files, including `hsf2.key`. The launcher checks every file by checksum and tells you which is missing or
+  different. These sets work too, the same release for other regions: `hsf2a` (Asia 040202) and `hsf2j` (Japan
+  040202). Other revisions are refused (`hsf2j1`, Japan 031222): the port is made from this program, and its features
+  use addresses found in it.
+- One of: macOS 13 or later (Apple silicon or Intel); Linux x86_64 or SteamOS; Windows 10 or 11, 64-bit.
+- A gamepad or stick with six buttons is recommended.
+
+## Playing
+
+Hyper Street Fighter II comes with [CPS-2 Recomp](../../README.md#getting-started): open its launcher and show it your
+ROM set (drop `hsf2.zip` or its folder on the window, or choose the folder you keep your sets in), then press
+**Play** beside Hyper Street Fighter II. From a terminal, `cps2recomp-launcher --play hsf2` starts it straight
+away; the game's own program (`hsf2`, beside the launcher) runs by itself too: `hsf2 --help` lists what it takes.
+
+While playing, Esc or `F1` (on a gamepad, the left stick's click, or Start and Select together) opens the in-game
+menu. Only the menu's "Quit game" row (or closing the window) ends the game.
 
 ## Building from source
 
-With your own ROM sets in `rom/hsf2/` (ignored by Git), CMake, Ninja, SDL 3 and Python 3, from the repository's top:
+With your own ROM set in `rom/hsf2/` (ignored by Git), CMake, Ninja, SDL 3 and Python 3,
+from the repository's top:
 
 ```sh
 make GAME=hsf2            # twice the first time
-make GAME=hsf2 explore    # once: finds the game's code by made-up play and translates it
+make GAME=hsf2 explore    # once, about an hour: finds the game's code by made-up play and translates it
 make GAME=hsf2 run
+make GAME=hsf2 check FRAMES=40000 MOVIE=games/hsf2/movies/ladder.txt ARGS="--features free_play,no_damage,one_hit"
 ```
 
-The game has no sources of its own yet, so made-up play only inserts coins and presses buttons at random.
-Hyper Street Fighter II was made from Super Street Fighter II Turbo's program: a build of [ssf2t](../ssf2t/README.md)
-first lets `tools/portmap.py` move that game's known entry points to this one's before exploring
-(`--from work/ssf2t --to work/hsf2 --limit 400000 --entries ...`, added to `work/hsf2/entries.txt`).
+[docs/BUILDING.md](../../docs/BUILDING.md) has every platform, the checks and the release builds, and
+[PROGRESS.md](PROGRESS.md) what was found about the game and what is next.
 
-## Progress
+## Feedback and contributing
 
-**Where it stands (first port).** Made-up play from Super Turbo's moved entry points found 553 entries: 120,595
-instructions translated (more than Super Turbo's 108,415), 88 left to the interpreter, 65 of them data a guess took for
-code. All the code reached so far is in the program's first megabyte (000000 to 0E8AF8); `code_end` stays at 400000
-until play reaches past it. A run of 6,000 frames of made-up play (title, attract mode, the versus screen, a fight)
-ran nothing in the interpreter, at about 600 frames a second without a window. The Z80's sound program is translated
-whole.
+Bug reports and pull requests are welcome: see [CONTRIBUTING.md](../../CONTRIBUTING.md) for the rules (above all:
+nothing from the game, ever).
 
-**Its music, for a custom soundtrack** (`src/music.cpp`). The sound program's table of songs is Super Turbo's
-layout with the same 68 pieces of music under the same numbers, so they carry Super Turbo's names and its soundtracks
-play here; F12 switches between the player's files and the board's music, as in every game with named music. Seen in
-made-up play (three runs of 20,000 frames): the stages of Ryu, Guile, Dhalsim, Cammy and T. Hawk (a stage's tune is
-the stage's, whoever fights there), the later versions of Guile's, Dhalsim's and T. Hawk's, versus and the winner,
-all as in Super Turbo; player select is 0x34 here (the screen with the choice of version), not Super Turbo's 0xD3.
-Not seen yet, named as Super Turbo has them: the title (attract mode plays no sound unless the board's demo sound is
-on), the other stages, the final fight, continue, game over, the ranking, the ending and the staff roll.
+## License and credits
 
-**How much of Super Turbo it shares.** `tools/portmap.py --from work/ssf2t --to work/hsf2 --limit 400000` placed
-11,988 of Super Turbo's 29,411 walked instructions (40.8%) on 602 anchors, named 2,325 places, and moved 244 of its
-825 entry points. Much of the program is Super Turbo's, but moved and changed, as the version select and the added
-characters' versions would make it.
-
-**Super Turbo's sources, built for this game.** game.cfg's `sources = ssf2t` builds Super Turbo's `src/` here too,
-each place they name written `At(0x...)` and found in this game by `family.h` (as Vampire Savior 2 builds Vampire
-Savior's): 43 by `tools/places.py` from the portmap, 17 by hand (`// by hand`, each with how). Besides places, what
-is this game's own is in `family.h` as well:
-
-- **The game's steps.** A level fewer than Super Turbo's: FF8000 is 2 while the players choose (the character and
-  the version) and 4 for the match; FF8004 is the match's step (8 the round); FF8008 the round's (2 while it is
-  fought). The show: 6 the introduction and the title, 0C a demonstration fight, 0E the rankings.
-- **The players' records.** Super Turbo's to +2B4; past it moved (the side +301, the character +32B, the person +328,
-  the colours +32C, the version +32A, the other player +344).
-- **The boxes.** Four it can be hit in (Super Turbo's three), each four words (Super Turbo's four bytes), the
-  attack's 0x14 bytes, the push box's table at 0A.
-- **The computer's first step** calls the character's tables, its plan and the round's plan at 06BD16, 06C922 and
-  06A1C8, as Super Turbo's does at 07D6F4, 07E36E and 07BB82.
-
-Left out of Super Turbo's sources (game.cfg's `sources_leave_out`): the tag team battle (its tag style; the knock-out
-style is the game's own rounds), the model viewer, widescreen, custom colours and Super Turbo's hidden characters
-(this game has all the versions). What those gave the others is `src/left_out.cpp`; this game's own `game.cpp` and
-`music.cpp` take the place of Super Turbo's.
-
-Checked without a window: with nothing on, the same frames as before, hash for hash; a training session with hit
-boxes, frame data, the input display and the readouts; the dummy crouching, jumping, guarding, recording and
-replaying; survival, endless battle and ring out; attract mode's parts and the stage viewer; free play; the Board's
-choices in the board's memory; no damage, infinite time and one-hit knockouts; run-ahead the same, hash for hash.
-
-**Next.** The modes' fighters all play the Super X version (Super Turbo's): a choice of version for each; widescreen
-(Super Turbo's rewrites its camera routines, which this game has elsewhere), the tag style, the model viewer.
+GPL-3.0-only (see [LICENSE](../../LICENSE)); [THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md) lists what comes
+from other projects. The repository holds no game data and nothing derived from it.

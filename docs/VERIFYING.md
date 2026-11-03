@@ -32,6 +32,46 @@ the per-frame state hashes (`--hash-log`: CPU, RAM, video and object memory, reg
 `blocks` against `native`, and `native` against itself. This covers what the block check cannot:
 routines calling one another on the host's stack, and time running out inside them.
 
+## `make check-release` (FRAMES=n): the build with no translated code
+
+Builds the game with no translated code (what CI builds, and a checkout before `make explore`) and runs the ladder
+movie, five runs at once, comparing the picture hashes frame for frame: two runs of that build alike; that build
+against the translated build run with `--cpu interp` (the same program but for the translated code); and the
+translated build against itself with `--cpu blocks` (its translated code is the interpreter's over the whole ladder).
+The build with no translated code is not compared with the translated build: the interpreter takes interrupts
+between instructions, translated code between blocks, and where a game's frames fill the processor that moves when a
+task gives way and so the random number (Alpha, Alpha 2 and Super Turbo part for good within the ladder, #190). How
+many frames differ is shown, not checked. It prints a checksum of the picture hashes, which a build for any other
+system must give too.
+
+## `make check-rollback` (FRAMES=n): what online play needs
+
+Online play (#70) runs a frame with the other player's controls guessed, and when they come and the guess was
+wrong, puts the machine and the game's sources back and runs the frames again. That works only if a frame put
+back comes out exactly as the first time. `--rollback-test SEED` does that to a run with no network: player 2's
+(and 3's) controls come late, by a lag that changes at random from 0 to 8 frames, are guessed as last known until
+they do, and the frames guessed wrong are run again. `--hash-log` writes a frame once its controls are the real
+ones, and must be the same as a run without it. `tools/check_rollback.sh` compares the two three ways: with the
+game's own features, with every feature that changes play on (cheats, free play, widescreen, the arcade timing),
+and with the frames run again not drawn (`--hash-no-picture`), as online play runs them. A difference is
+something the game's sources keep outside the save state (`TheGame().state`), or do twice for a frame run twice.
+
+It also says what a rollback costs: a frame, keeping and putting back the state (about 330 KB), and a frame with
+its rollback at the worst. On the Steam Deck a frame is about 2–2.5 ms and keeping or putting back the state
+0.03 ms; drawing is three quarters of a frame, and with the frames run again not drawn a rollback of 9 frames
+stays under 12 ms (Super Turbo, with the arcade timing and widescreen), inside the 16.7 ms of a frame.
+
+## `make check-online` (FRAMES=n): two copies of the game against each other
+
+Online play (`port/netplay.h`) between two copies of the game on one machine: one `--host`s, the other `--join`s it
+over localhost, each with made-up play for its own player (`--auto`), and every packet sent late, 50 ms give or take
+25, and one in twenty lost (`--net-fake 50:25:5`), so that guesses go wrong and frames are rolled back. The host has
+every feature that changes play on and the joining side none, so the joining side must take the host's. Each writes
+a frame's hash once it has both players' real controls (`--hash-log`), and the two logs must be the same; neither
+side may stop on a desync (exit 5). The two agreeing is not enough (each could be playing the wrong player), so the
+host also records both players' controls as the match had them (`--record`), and they are replayed without the
+network (`--hash-no-picture --hash-no-sound`): the hashes must be the match's. It runs at the board's pace, so 3000 frames take 50 seconds. Every game passes.
+
 ## Input
 
 - `--auto SEED[:FROM]`: made-up play (coins, start, sticks and buttons at random); the same seed
