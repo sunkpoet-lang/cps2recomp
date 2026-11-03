@@ -26,6 +26,7 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <type_traits>
 #include <vector>
 
 namespace cps2recomp {
@@ -263,12 +264,17 @@ private:
     bool boardTiming = false;
     bool m_palettePending = false; // (the game has set the palette's base: the DMA copies it at the next line)
     void RunSound(int cycles);
+    // (kept in save states whole: the bytes the compiler would leave between the fields are fields of their own,
+    // nought, or they would carry whatever the memory held and two boards' states would differ online)
     struct ChipWrite {
         uint8_t reg;
+        uint8_t unused = 0;
         uint16_t data;
         uint16_t pc;
+        uint16_t unused2 = 0;
         uint32_t gap; // Z80 cycles since the write before, or since the piece of work began
     };
+    static_assert(std::has_unique_object_representations_v<ChipWrite>);
     // (SoundSide::Driver) the driver's writes wait here for their time: each as long after the one before as
     // the Z80 would have been, and no more than one a sample
     std::vector<ChipWrite> m_chipQueue;

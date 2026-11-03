@@ -73,13 +73,13 @@ Machine::Machine(const RomSet &roms)
     if (SoundDriver::Knows(roms.soundProgram)) {
         soundDriver = std::make_unique<SoundDriver>(roms.soundProgram, soundRam, [this](uint8_t reg, uint16_t data, uint32_t gap) {
             if (soundSide == SoundSide::Check) {
-                m_driverWrites.push_back({reg, data, 0, gap});
+                m_driverWrites.push_back({.reg = reg, .data = data, .pc = 0, .gap = gap});
                 return;
             }
             if (m_chipQueue.empty()) {
                 m_chipNext = std::max(soundCpu.cycles, m_chipLast) + gap;
             }
-            m_chipQueue.push_back({reg, data, 0, gap});
+            m_chipQueue.push_back({.reg = reg, .data = data, .pc = 0, .gap = gap});
         });
     }
     if (getenv("CPS2RECOMP_SOUND_GAPS")) {
@@ -835,7 +835,7 @@ void Machine::Write(uint16_t address, uint8_t value) {
             } else if (address == 0xD001) {
                 m_chipLatch = static_cast<uint16_t>((m_chipLatch & 0xFF00) | value);
             } else {
-                m_z80Writes.push_back({value, m_chipLatch, soundCpu.pc, static_cast<uint32_t>(soundCpu.cycles - m_z80Mark)});
+                m_z80Writes.push_back({.reg = value, .data = m_chipLatch, .pc = soundCpu.pc, .gap = static_cast<uint32_t>(soundCpu.cycles - m_z80Mark)});
                 m_z80Mark = soundCpu.cycles;
             }
         }
