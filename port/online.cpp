@@ -305,6 +305,10 @@ bool Online::Start(Port &port, const OnlineOptions &options, std::string &error)
     port.gekkoOnline = true;
     TheGame().online = true;
     port.SoundtrackFollow(); // (the custom soundtrack off: the board's music)
+    // (the fingerprints compared leave out the picture, as frames run again are not drawn, and the sound side, as
+    // Tommy's netplay does: Port::StateHash)
+    port.opt.hashNoPicture = true;
+    port.opt.hashNoSound = true;
     Machine &machine = *port.machine;
 
     // The state GekkoNet keeps: the save state, with room to spare (its size hardly changes)
@@ -488,7 +492,9 @@ void Online::Run() {
             }
             memcpy(event->data.save.state, m_state.data(), m_state.size());
             *event->data.save.state_len = static_cast<unsigned int>(m_state.size());
-            *event->data.save.checksum = Crc(0, m_state);
+            // (the game's fingerprint, as Tommy's netplay compares it: not the saved bytes, which may hold padding
+            // or bookkeeping that changes nothing in the game)
+            *event->data.save.checksum = m_port->StateHash();
             break;
         }
         case GekkoLoadEvent: {
@@ -504,7 +510,7 @@ void Online::Run() {
             // A frame run again (or ahead) is neither seen nor heard: its sound is dropped
             const bool again = event->data.adv.rolling_back || event->data.adv.running_ahead;
             const size_t heard = machine.audio.size();
-            m_port->RunOnlineFrame(players);
+            m_port->RunOnlineFrame(players, again);
             if (again) {
                 machine.audio.resize(heard);
             }

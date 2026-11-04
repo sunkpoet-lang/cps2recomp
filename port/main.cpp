@@ -2417,8 +2417,9 @@ void Port::GatherInput() {
 }
 
 // (this fork) GekkoNet online (online.h): one frame of the session, with both players' controls as they were, through
-// Step, and nothing of this side's own (no run-ahead, movie or test switch)
-void Port::RunOnlineFrame(const uint16_t players[2]) {
+// Step, and nothing of this side's own (no run-ahead, movie or test switch). A frame run `again` (a rollback's, or run
+// ahead) is not drawn and not counted, as Tommy's netplay does (Netplay::Run): only the frames seen move `frame` on.
+void Port::RunOnlineFrame(const uint16_t players[2], bool again) {
     ClearSpareRan();
     SoundtrackFollow();
     machine->SetBoardTiming(FeatureOn("arcade_timing"));
@@ -2427,7 +2428,12 @@ void Port::RunOnlineFrame(const uint16_t players[2]) {
     all[1] = players[1];
     machine->serviceButton = false;
     machine->testSwitch = false;
+    machine->drawing = !again;
     Step(all);
+    machine->drawing = true;
+    if (again) {
+        return;
+    }
     frame++;
     if (hashFile) {
         fprintf(hashFile, "%llu %08x\n", static_cast<unsigned long long>(frame), StateHash());

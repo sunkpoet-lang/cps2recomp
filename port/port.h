@@ -279,7 +279,7 @@ struct Port {
     uint64_t againAt = 0; // (joining: the tick to try again at)
     // (this fork) GekkoNet online (online.h): one frame of the session with both players' controls, through Step;
     // `gekkoOnline` turns off stopping, slowing, save states, reset, the modes and the custom soundtrack
-    void RunOnlineFrame(const uint16_t players[2]);
+    void RunOnlineFrame(const uint16_t players[2], bool again);
     // ... the input part of a frame: pad[] from the movie or the made-up play (the window sets it itself)
     void GatherInput();
     bool gekkoOnline = false;
