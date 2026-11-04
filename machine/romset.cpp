@@ -427,7 +427,7 @@ bool LoadRomSet(const std::string &path, const RomList &list, RomSet &set, std::
             beside = path;
         } else {
             zips.push_back(path);
-            const size_t slash = path.find_last_of('/');
+            const size_t slash = path.find_last_of("/\\"); // (this fork: a Windows path's backslash too)
             beside = slash == std::string::npos ? "." : path.substr(0, slash);
         }
         std::vector<std::string> names = {list.set, list.parent};

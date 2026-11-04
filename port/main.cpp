@@ -2649,8 +2649,10 @@ bool InCollection() {
     static const bool collection = [] {
         const char *base = SDL_GetBasePath();
         std::error_code missing;
+        // (this fork: ForkAde's collection launcher, ForkAde-Launcher, as well as this toolkit's)
         return base && !std::filesystem::exists(std::string(base) + GAME_ID "-launcher" + kExeSuffix, missing) &&
-               std::filesystem::exists(std::string(base) + "cps2recomp-launcher" + kExeSuffix, missing);
+               (std::filesystem::exists(std::string(base) + "ForkAde-Launcher" + kExeSuffix, missing) ||
+                std::filesystem::exists(std::string(base) + "cps2recomp-launcher" + kExeSuffix, missing));
     }();
     return collection;
 }
@@ -2989,8 +2991,12 @@ bool StartLauncher() {
     std::error_code missing;
     bool collection = false;
     if (!std::filesystem::exists(launcher, missing)) {
-        launcher = std::string(base) + "cps2recomp-launcher" + kExe;
+        // (this fork: ForkAde's collection launcher first, then this toolkit's)
+        launcher = std::string(base) + "ForkAde-Launcher" + kExe;
         collection = true;
+        if (!std::filesystem::exists(launcher, missing)) {
+            launcher = std::string(base) + "cps2recomp-launcher" + kExe;
+        }
         if (!std::filesystem::exists(launcher, missing)) {
             return false;
         }
@@ -3010,6 +3016,10 @@ bool StartLauncher() {
         recomp::Ini prefs(folder / "launcher.ini");
         prefs.load();
         setUp = !prefs.get(collection ? "game." GAME_ID : "game", "rom").empty();
+        // (this fork: ForkAde's shared ROM library, which every game's set is found in)
+        if (collection && !prefs.get("library", "directory").empty()) {
+            setUp = true;
+        }
     }
     const char *own[] = {launcher.c_str(), setUp ? "--play" : nullptr, nullptr};
     const char *theirs[] = {launcher.c_str(), setUp ? "--play" : "--page", GAME_ID, nullptr};
