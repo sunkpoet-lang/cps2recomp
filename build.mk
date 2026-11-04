@@ -43,7 +43,6 @@ SHARES := $(shell $(CFG) sources $(GAME))
 # Another set the game reads (game.cfg's extra_set: characters of another game taken in, tools/graft.py)
 EXTRA_SET := $(shell $(CFG) extra_set $(GAME))
 HOOK_SOURCES := games/$(GAME)/src$(foreach g,$(SHARES),:games/$(g)/src)
-# (the shared files the game leaves out: game.cfg's sources_leave_out; and its own of the same name stand for them)
 
 PROGRAM := $(WORK)/program.bin
 ENTRIES := $(WORK)/entries.txt

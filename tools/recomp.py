@@ -345,8 +345,6 @@ def main():
     ap.add_argument("--hook-sources", default=None,
                     help="the game's sources (folders, with %s between): translated code stops by for a hook wherever they say "
                          "AddHook(0x...) or AddRewrite(0x...)" % os.pathsep)
-    ap.add_argument("--hook-skip", default="",
-                    help="files of the shared sources the game leaves out (game.cfg's sources_leave_out)")
     ap.add_argument("--hooks", default=None,
                     help="more places translated code stops by for a hook (files of them, hex, one a line, with %s between)" % os.pathsep)
     ap.add_argument("--places", default=None,
@@ -387,12 +385,8 @@ def main():
             if value not in places:
                 sys.exit("recomp: the sources name At(0x%06X), and %s does not say where that is" % (value, args.places))
             return places[value]
-        # (a file of the first folder's, the game's own, stands for the shared one of the same name; and the shared
-        # files the game leaves out are not read)
-        skip = set((args.hook_skip or "").split())
-        own = set(os.listdir(folders[0])) if folders else set()
-        texts = [open(os.path.join(d, name)).read() for i, d in enumerate(folders) for name in sorted(os.listdir(d))
-                 if name.endswith((".cpp", ".h")) and (i == 0 or (name not in skip and name not in own))]
+        texts = [open(os.path.join(d, name)).read() for d in folders for name in sorted(os.listdir(d))
+                 if name.endswith((".cpp", ".h"))]
         names = {}
         if args.places and os.path.exists(args.places):
             # (a game's family.h may name places of its own, written as they are: hooks the sources make there)
@@ -410,7 +404,8 @@ def main():
                     hooks.add(names[where])
                 else:
                     sys.exit("recomp: the sources hook %s, and nothing says where that is" % where)
-    for path in (args.hooks or "").split(os.pathsep):
+    import re as _re
+    for path in _re.split(r"[:;](?![/\\])", args.hooks or ""):  # (as --hook-sources: ";" is Windows' separator)
         if path and os.path.exists(path):
             hooks |= {int(line, 16) for line in open(path).read().split()}
     hooks = sorted(hooks - {0})  # (0: a place the game does not have, lift.h's kNoPlace)
