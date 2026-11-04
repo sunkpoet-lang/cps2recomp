@@ -22,8 +22,15 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
+
+#include "chat_link.h"
+
+namespace recomp::chat {
+class Channel;
+}
 
 struct GekkoSession;
 
@@ -36,9 +43,14 @@ struct OnlineOptions {
     uint16_t port = 7845; // the host's, or the one --join goes to
     std::string host;     // --join's address
     int delay = 1;
+    std::string name;     // (this fork) --nick: this player's name, said in the hello (ForkAde's in-game chat)
+    int chatLoss = 0;     // (this fork) --chat-loss PCT: (tests) that share of the chat's packets dropped as sent
 };
 
-class Online {
+// (this fork) The session also carries the in-game chat (ChatLink): ForkAde's docs/chat-protocol.md, its C and A
+// packets on the session's socket, never GekkoNet's, and each player's name after a 0 byte in the hello, outside the
+// part both sides compare
+class Online : public ChatLink {
 public:
     enum class Status { Waiting, Connecting, Playing, Ended };
 
@@ -68,6 +80,16 @@ public:
     float FramesAhead() const;
     void Stop();
 
+    // (this fork) ChatLink
+    Said ChatSay(const std::string &text, std::string &line) override;
+    std::vector<std::string> ChatHeard() override;
+    std::string ChatName(int player) const override;
+    int ChatLocal() const override;
+    bool ChatHost() const override;
+    bool ChatReady() const override;
+    bool ChatOver() const override;
+    std::vector<std::string> ChatUndelivered() const override;
+
     // (the adapter's, for GekkoNet's callbacks)
     struct Socket;
 
@@ -93,6 +115,8 @@ private:
     std::vector<uint8_t> m_state;
     int m_shown = 0;
     int m_coinFrames = 0;
+    std::unique_ptr<recomp::chat::Channel> m_chat; // (this fork: the in-game chat)
+    std::string m_theirName;
 };
 
 } // namespace port

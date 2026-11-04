@@ -1279,15 +1279,10 @@ bool Port::Tick() {
         // Online: a frame a tick when the other side's controls allow (and as fast as it goes while the game's
         // sources take it somewhere); no stopping, slowing or speeding up
         const bool ready = net->Ready(frame);
-        HearChat();
+        ChatTick(); // (this fork: the chat over either session, its log and its test lines)
         if (!opt.netTyping.empty()) {
             typing = true;
             typed = opt.netTyping;
-        }
-        if (!opt.netSay.empty() && frame >= opt.netSayAt) {
-            typed = opt.netSay;
-            opt.netSay.clear();
-            Say();
         }
         if (!ready) {
             if (!net->ended.empty()) {
@@ -1467,7 +1462,11 @@ void Port::Shown(std::vector<uint32_t> &pixels, std::vector<SDL_Rect> *panels) c
                 under(side, y, "STREAK " + std::to_string(streak[side]), {255, 210, 80, 255});
             }
         }
-        // The chat: its lines at the left, above the super gauges, the newest lowest, and the line being typed under them
+    }
+    // The chat: its lines at the left, above the super gauges, the newest lowest, and the line being typed under them
+    // (this fork: over either online session, Chat)
+    if (Chat()) {
+        const recomp::text::Canvas canvas{pixels.data(), across, Video::kHeight};
         float y = Video::kHeight - 44.0f;
         auto line = [&](const std::string &text, recomp::text::Color colour) {
             const float width = recomp::text::TextWidth(text.c_str(), 1);
@@ -1480,18 +1479,42 @@ void Port::Shown(std::vector<uint32_t> &pixels, std::vector<SDL_Rect> *panels) c
         };
         // (and under them, what the keys and buttons are: while a line is typed, and for a while as a match begins)
 #ifdef __ANDROID__
-        const char *open = "Chat: tap CHAT (or a gamepad's right stick click)", *keys = "Enter: send   CHAT or Back: cancel";
+        const std::string open = "Chat: tap CHAT (or a gamepad's right stick click)", keys = "Enter: send   CHAT or Back: cancel";
 #else
-        const char *open = "Chat: T, or a gamepad's right stick click", *keys = "Enter: send   Esc or right stick click: cancel";
+        // (this fork: the key the window chose for the match, T or Y)
+        const std::string open = "Chat: " + chatKey + (chatKeyShared ? " (online the chat's, not the game's)" : "") +
+                                 ", or a gamepad's right stick click";
+        const std::string keys = "Enter: send   Esc or right stick click: cancel";
 #endif
         if (typing) {
             line(keys, {170, 170, 170, 255});
+            if (tick < chatWaitUntil) {
+                line("Wait a moment: three lines in five seconds at most", {255, 130, 120, 255}); // (this fork)
+            }
             line("Say: " + typed + ((tick / 20) % 2 ? "_" : " "), {255, 210, 80, 255});
         } else if (tick < chatHintUntil) {
             line(open, {170, 170, 170, 255});
         }
         for (auto it = chat.rbegin(); it != chat.rend(); ++it) {
             line(it->text, it->own ? recomp::text::Color{170, 200, 255, 255} : recomp::text::Color{255, 255, 255, 255});
+        }
+    }
+    // (this fork) Game > Chat history: the match's lines with their times, the newest lowest, as many as fit
+    if (historyOpen && !chatHistory.empty()) {
+        const recomp::text::Canvas canvas{pixels.data(), across, Video::kHeight};
+        const size_t fit = std::min<size_t>(chatHistory.size(), 14);
+        const float top = 20.0f, height = fit * 12.0f + 18.0f;
+        canvas.Fill(6, top, across - 12.0f, height, {20, 22, 30, 225});
+        canvas.Text(12, top + 4, 1, 0, {255, 210, 80, 255}, "CHAT HISTORY (Game > Chat history to close)");
+        float y = top + 16;
+        for (size_t i = chatHistory.size() - fit; i < chatHistory.size(); i++, y += 12) {
+            const ChatRecord &one = chatHistory[i];
+            const std::string text = one.time + " " + one.who + ": " + one.text + (one.delivered ? "" : " (not delivered)");
+            canvas.Text(12, y, 1, 0, one.own ? recomp::text::Color{170, 200, 255, 255} : recomp::text::Color{255, 255, 255, 255},
+                        text.c_str());
+        }
+        if (panels) {
+            panels->push_back({6, static_cast<int>(top), across - 12, static_cast<int>(height)});
         }
     }
     // (online: Esc's question, in the middle, over the game, which goes on; the port's own, not the readout, which the
@@ -2088,28 +2111,105 @@ namespace {
     constexpr size_t kChatLines = 5;
 }
 
-void Port::Say() {
-    std::string line = typed;
-    typing = false;
-    typed.clear();
-    if (!net || connecting) {
-        return;
+// (this fork: over either online session, Chat; the line kept in the input when over the rate, Say then false; each
+// line kept in the match's history and log)
+bool Port::Say() {
+    ChatLink *link = Chat();
+    if (!link) {
+        return true;
     }
-    net->Say(line);
-    const std::string name = net->Name(net->Local());
-    if (line.find_first_not_of(' ') != std::string::npos) {
-        chat.push_back({(name.empty() ? "You" : name) + ": " + line.substr(0, Netplay::kChatMost), tick + kChatTicks, true});
+    std::string line;
+    const ChatLink::Said said = link->ChatSay(typed, line);
+    if (said == ChatLink::Said::Wait) {
+        chatWaitUntil = tick + 120;
+        return false;
     }
+    if (said == ChatLink::Said::Sent) {
+        const std::string name = ChatShownName(*link, link->ChatLocal());
+        chat.push_back({name + ": " + line, tick + kChatTicks, true});
+        chatHistory.push_back({recomp::chat::LocalTime().substr(11, 8), name, line, true, true});
+        if (chatLog) {
+            chatLog->Sent(name, line);
+        }
+    }
+    return true;
 }
 
 void Port::HearChat() {
-    const std::string name = net->Name(1 - net->Local());
-    for (const std::string &line : net->TakeHeard()) {
-        fprintf(stderr, "online: chat: %s: %s\n", name.empty() ? "(no name)" : name.c_str(), line.c_str());
-        chat.push_back({(name.empty() ? "Them" : name) + ": " + line, tick + kChatTicks, false});
+    if (ChatLink *link = Chat()) {
+        const std::string name = ChatShownName(*link, 1 - link->ChatLocal());
+        for (const std::string &line : link->ChatHeard()) {
+            fprintf(stderr, "online: chat: %s: %s\n", name.c_str(), line.c_str());
+            chat.push_back({name + ": " + line, tick + kChatTicks, false});
+            chatHistory.push_back({recomp::chat::LocalTime().substr(11, 8), name, line, false, true});
+            if (chatLog) {
+                chatLog->Received(name, line);
+            }
+        }
     }
     while (!chat.empty() && (chat.size() > kChatLines || chat.front().until <= tick)) {
         chat.pop_front();
+    }
+}
+
+// (this fork) The chat's link: Tommy's netplay while its match is on, else ForkAde's GekkoNet session while it plays
+ChatLink *Port::Chat() const {
+    if (net) {
+        return connecting || !net->ChatReady() ? nullptr : net.get();
+    }
+    return gekkoChat && gekkoChat->ChatReady() ? gekkoChat : nullptr;
+}
+
+std::string Port::ChatShownName(const ChatLink &link, int player) const {
+    const std::string name = link.ChatName(player);
+    return name.empty() ? (player == 0 ? "Player 1" : "Player 2") : name;
+}
+
+// (this fork) Every tick of a match: a new match's log (--chat-log), the lines that came, the tests' lines (--net-say,
+// at their frames), and at the match's end the lines the other side never acknowledged, as not delivered
+void Port::ChatTick() {
+    ChatLink *link = Chat();
+    if (link && link != chatMatch) {
+        chatMatch = link;
+        chatEnded = false;
+        chatHistory.clear();
+        chatLog = std::make_unique<recomp::chat::Log>();
+        chatLog->Start(opt.chatLog, GAME_ID, CPS2RECOMP_VERSION, link->ChatHost());
+        chatLog->Names(ChatShownName(*link, link->ChatLocal()), ChatShownName(*link, 1 - link->ChatLocal()));
+        if (!net) {
+            chatHintUntil = tick + kChatTicks; // (Tommy's netplay: Matched says it)
+        }
+        fprintf(stderr, "online: chat: with %s, as %s\n", ChatShownName(*link, 1 - link->ChatLocal()).c_str(),
+                ChatShownName(*link, link->ChatLocal()).c_str());
+    }
+    HearChat();
+    if (link) {
+        for (auto it = opt.netSays.begin(); it != opt.netSays.end();) {
+            if (frame < it->first) {
+                ++it;
+                continue;
+            }
+            typed = it->second;
+            Say();
+            typed.clear();
+            it = opt.netSays.erase(it);
+        }
+    }
+    ChatLink *any = net ? net.get() : gekkoChat;
+    if (chatMatch && !chatEnded && (!any || any->ChatOver() || (net && connecting))) {
+        chatEnded = true;
+        chatMatch = nullptr;
+        if (any) {
+            const std::string name = ChatShownName(*any, any->ChatLocal());
+            for (const std::string &line : any->ChatUndelivered()) {
+                fprintf(stderr, "online: chat: not delivered: %s\n", line.c_str());
+                chatHistory.push_back({recomp::chat::LocalTime().substr(11, 8), name, line, true, false});
+                if (chatLog) {
+                    chatLog->Undelivered(name, line);
+                }
+            }
+        }
+        chatLog.reset();
     }
 }
 
@@ -2438,6 +2538,14 @@ void Port::RunOnlineFrame(const uint16_t players[2], bool again) {
     if (hashFile) {
         fprintf(hashFile, "%llu %08x\n", static_cast<unsigned long long>(frame), StateHash());
     }
+    if (opt.shotEvery && frame % opt.shotEvery == 0) {
+        // (--shot-every: the picture as the window shows it, the chat's lines and all)
+        char shot[512];
+        snprintf(shot, sizeof(shot), "%s%06llu.png", opt.shotPrefix.c_str(), static_cast<unsigned long long>(frame));
+        std::vector<uint32_t> shown;
+        Shown(shown);
+        WritePng(shot, shown.data(), ShownWidth(), Video::kHeight);
+    }
 }
 
 void Port::RunFrame() {
@@ -2712,7 +2820,9 @@ void Usage() {
             "  --net-service URL      the online service that gives hosts codes (online/), or off\n"
             "  --net-list             (hosting) the match in the lobby, the Online card's list of open matches\n"
             "  --net-name NAME        ... under this name; and either side's: shown to the other player\n"
-            "  --net-say [FRAME:]TEXT (tests) TEXT said in the chat at FRAME of the match (120 unless said)\n"
+            "  --net-say [FRAME:]TEXT (tests) TEXT said in the chat at FRAME of the match (120 unless said); again for more\n"
+            "  --nick NAME            this player's name in the chat, in either online session (ForkAde's)\n"
+            "  --chat-log DIR         each online match's chat kept in DIR, a JSON Lines file a match (ForkAde's)\n"
             "  --net-typing TEXT      (pictures) TEXT shown as a chat line being typed, all through the match\n"
             "  --net-arcade           (hosting) the game played alone until the other player comes, who then challenges\n"
             "  --net-invite TO:FROM   (hosting) the player TO in the launcher's waiting room invited, from FROM (ids;\n"
@@ -2860,12 +2970,24 @@ bool ParseArgs(int argc, char **argv, port::Options &o) {
         } else if (a == "--net-name") {
             o.net.name = next();
         } else if (a == "--net-say") {
-            o.netSay = next();
-            const size_t colon = o.netSay.find(':');
-            if (colon != std::string::npos && colon > 0 && o.netSay.find_first_not_of("0123456789") == colon) {
-                o.netSayAt = strtoull(o.netSay.c_str(), nullptr, 10);
-                o.netSay.erase(0, colon + 1);
+            // (this fork: any number of them, each at its frame)
+            std::string say = next();
+            uint64_t at = 120;
+            const size_t colon = say.find(':');
+            if (colon != std::string::npos && colon > 0 && say.find_first_not_of("0123456789") == colon) {
+                at = strtoull(say.c_str(), nullptr, 10);
+                say.erase(0, colon + 1);
             }
+            o.netSays.push_back({at, say});
+        } else if (a == "--nick") {
+            // (this fork) either session's name for this player (ForkAde's launcher's nickname)
+            o.nick = next();
+            o.net.name = o.nick;
+            o.gekko.name = o.nick;
+        } else if (a == "--chat-log") {
+            o.chatLog = next();
+        } else if (a == "--chat-loss") {
+            o.gekko.chatLoss = atoi(next()); // (tests: the chat's packets dropped at random, PCT of them)
         } else if (a == "--net-typing") {
             o.netTyping = next();
         } else if (a == "--net-invite") {

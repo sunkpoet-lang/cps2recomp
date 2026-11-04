@@ -9,11 +9,13 @@
 #include "../runtime/game.h"
 #include "../runtime/state.h"
 #include "port.h"
+#include "../recomp-common/chat.h"
 
 #include <gekkonet.h>
 #include <zlib.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -44,6 +46,12 @@ using cps2recomp::TheGame;
 namespace {
     // Every packet starts with these three bytes and a kind: H, hello (before GekkoNet's own); G, GekkoNet's
     constexpr char kTag[3] = {'N', 'G', 'O'};
+
+    // (this fork: the chat's clock, in milliseconds)
+    uint64_t NowMs() {
+        return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                                         std::chrono::steady_clock::now().time_since_epoch()).count());
+    }
     constexpr int kPredictionWindow = 8;
     constexpr unsigned kTimeoutMs = 5000; // (under the tunnel's 8 s without traffic)
     // The address GekkoNet is given for the other player: the socket knows where that is
@@ -135,6 +143,7 @@ struct Online::Socket {
     std::deque<std::vector<uint8_t>> forGekko;   // GekkoNet's packets from the peer, until it asks
     std::vector<GekkoNetResult *> handedOver;    // (what receive_data last returned: the array is ours)
     std::vector<std::pair<sockaddr_in, std::vector<uint8_t>>> hellos;
+    std::vector<std::pair<char, std::vector<uint8_t>>> forChat; // (this fork: the chat's C and A, from the peer)
 
     ~Socket() {
         if (handle != kNoSocket) {
@@ -234,6 +243,8 @@ struct Online::Socket {
                 hellos.emplace_back(from, std::vector<uint8_t>(buffer + 4, buffer + got));
             } else if (buffer[3] == 'G' && havePeer && Same(from, peer)) {
                 forGekko.emplace_back(buffer + 4, buffer + got);
+            } else if ((buffer[3] == 'C' || buffer[3] == 'A') && havePeer && Same(from, peer)) {
+                forChat.emplace_back(static_cast<char>(buffer[3]), std::vector<uint8_t>(buffer + 4, buffer + got));
             }
         }
     }
@@ -295,6 +306,9 @@ void Online::Stop() {
     if (m_port) {
         TheGame().online = false;
         m_port->gekkoOnline = false;
+        if (m_port->gekkoChat == this) {
+            m_port->gekkoChat = nullptr;
+        }
     }
 }
 
@@ -351,6 +365,16 @@ bool Online::Start(Port &port, const OnlineOptions &options, std::string &error)
     m_hello.assign(text.begin(), text.end());
 
     m_socket = new Socket;
+    // (this fork) The in-game chat, on the session's socket
+    Socket *socket = m_socket;
+    m_chat = std::make_unique<recomp::chat::Channel>([socket, loss = options.chatLoss, seed = uint32_t{12345}](
+                                                         char kind, const std::vector<uint8_t> &payload) mutable {
+        seed = seed * 1103515245u + 12345u; // (--chat-loss: dropped at random, as a bad network would)
+        if (socket->havePeer && static_cast<int>((seed >> 16) % 100) >= loss) {
+            socket->Send(kind, payload.data(), payload.size(), socket->peer);
+        }
+    });
+    port.gekkoChat = this;
     g_socket = m_socket;
     const bool host = options.mode == OnlineOptions::Mode::Host;
     m_socket->host = host;
@@ -390,14 +414,20 @@ void Online::End(const std::string &message, bool failed) {
 
 void Online::SendHello() {
     if (m_socket->havePeer) {
-        m_socket->Send('H', m_hello.data(), m_hello.size(), m_socket->peer);
+        // (this fork: with this player's name after a 0 byte)
+        const std::vector<uint8_t> hello = recomp::chat::HelloWithName(m_hello, m_options.name);
+        m_socket->Send('H', hello.data(), hello.size(), m_socket->peer);
     }
 }
 
 // The hellos that came: the host takes the first one's sender as its peer; each side checks it is the same game
 void Online::Pump() {
     m_socket->Pump();
-    for (auto &[from, said] : m_socket->hellos) {
+    for (auto &[from, whole] : m_socket->hellos) {
+        // (this fork: the name after a 0 byte is not compared)
+        std::vector<uint8_t> said;
+        std::string name;
+        recomp::chat::SplitHello(whole, said, name);
         if (!m_socket->havePeer && m_socket->host) {
             m_socket->peer = from;
             m_socket->havePeer = true;
@@ -432,15 +462,32 @@ void Online::Pump() {
             return;
         }
         m_heard = true;
+        m_theirName = name;
         m_status = Status::Connecting;
         m_message = "Connecting";
     }
     m_socket->hellos.clear();
+    // (this fork) The chat's packets, once the other side is known
+    for (const auto &[kind, payload] : m_socket->forChat) {
+        if (m_heard && m_chat) {
+            m_chat->Receive(kind, payload.data(), payload.size(), NowMs());
+        }
+    }
+    m_socket->forChat.clear();
 }
 
 int Online::Tick(const uint16_t local[2]) {
     m_ticks++;
     m_shown = 0;
+    // (this fork) After the tick, whatever it did, the chat's (Port::ChatTick): lines heard, the log, the end
+    struct ChatAfter {
+        Port *port;
+        ~ChatAfter() {
+            if (port) {
+                port->ChatTick();
+            }
+        }
+    } chatAfter{m_options.mode == OnlineOptions::Mode::Stress ? nullptr : m_port};
     if (m_status == Status::Ended) {
         return 0;
     }
@@ -468,6 +515,9 @@ int Online::Tick(const uint16_t local[2]) {
         return 0;
     }
     gekko_network_poll(m_session);
+    if (m_chat) {
+        m_chat->Pump(NowMs()); // (this fork: the chat's lines not acknowledged yet, again)
+    }
     gekko_add_local_input(m_session, m_local, &mine);
     Run();
     return m_shown;
@@ -571,6 +621,43 @@ std::string Online::Stats() const {
                  rollbacks.last_frames);
     }
     return text;
+}
+
+// (this fork) ChatLink: the in-game chat over this session
+ChatLink::Said Online::ChatSay(const std::string &text, std::string &line) {
+    switch (m_chat ? m_chat->Say(text, NowMs(), &line) : recomp::chat::Channel::Said::Empty) {
+    case recomp::chat::Channel::Said::Sent: return Said::Sent;
+    case recomp::chat::Channel::Said::Wait: return Said::Wait;
+    default: return Said::Empty;
+    }
+}
+
+std::vector<std::string> Online::ChatHeard() {
+    return m_chat ? m_chat->TakeHeard() : std::vector<std::string>{};
+}
+
+std::string Online::ChatName(int player) const {
+    return player == ChatLocal() ? recomp::chat::Printable(m_options.name, recomp::chat::kNameMost) : m_theirName;
+}
+
+int Online::ChatLocal() const {
+    return m_options.mode == OnlineOptions::Mode::Join ? 1 : 0;
+}
+
+bool Online::ChatHost() const {
+    return m_options.mode == OnlineOptions::Mode::Host;
+}
+
+bool Online::ChatReady() const {
+    return m_chat && m_heard && m_status == Status::Playing;
+}
+
+bool Online::ChatOver() const {
+    return m_status == Status::Ended;
+}
+
+std::vector<std::string> Online::ChatUndelivered() const {
+    return m_chat ? m_chat->Unacknowledged() : std::vector<std::string>{};
 }
 
 float Online::FramesAhead() const {

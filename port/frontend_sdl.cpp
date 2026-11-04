@@ -171,7 +171,7 @@ namespace {
     }
 
     // The menu bar's own entries (the in-game menu's have ids of their own: recomp::IsMenuEntry)
-    enum { kBarQuickSave = 1, kBarQuickLoad, kBarFullscreen, kBarAbout, kBarKey, kBarScreenshot };
+    enum { kBarQuickSave = 1, kBarQuickLoad, kBarFullscreen, kBarAbout, kBarKey, kBarScreenshot, kBarChat, kBarChatHistory };
 
     // The keys that work while playing, for Help's list (each an entry that does nothing)
     const char *const kKeys[][2] = {
@@ -277,6 +277,8 @@ void BarMenus(Port &port, recomp::MenuBar &bar, bool fullscreen) {
         }
     }
     // (a menu with nothing in it is left out)
+    // (this fork) The in-game chat's entries, dim with no match to chat in
+    recomp::AddChatEntries(menus, kBarChat, kBarChatHistory, port.chatKey, port.Chat() != nullptr);
     menus.erase(std::remove_if(menus.begin(), menus.end(), [](const recomp::BarMenu &m) { return m.entries.empty(); }), menus.end());
     bar.Configure(std::move(menus));
 
@@ -551,9 +553,11 @@ int RunWindowed(Port &port) {
     // keyboard); Enter sends it, Esc (or the click again) puts it away. Meanwhile the keyboard is the chat's, and after
     // it, not the game's until every key is let go (the Enter that sent it is not the game's Start).
     uint64_t openedByT = 0; // (when T opened it: its own letter, if the system sends it as text too, is not the line's)
+    SDL_Scancode chatKey = SDL_SCANCODE_T; // (this fork: T, or Y; chosen as a match begins)
+    const ChatLink *chatKeyFor = nullptr;
     bool keysAfterChat = false;
     auto chatOpen = [&](bool open) {
-        if (open == port.typing || (open && (!port.net || port.connecting || port.leaving))) {
+        if (open == port.typing || (open && (!port.Chat() || port.leaving))) { // (this fork: either session's)
             return;
         }
         port.typing = open;
@@ -656,6 +660,10 @@ int RunWindowed(Port &port) {
             toggleFullscreen();
         } else if (chosen.id == kBarScreenshot) {
             screenshot();
+        } else if (chosen.id == kBarChat) {
+            chatOpen(true); // (this fork)
+        } else if (chosen.id == kBarChatHistory) {
+            port.historyOpen = !port.historyOpen;
         } else if (chosen.id == kBarAbout) {
             port.notice = std::string(title) + " - ForkAde, a native port by static recompilation (cps2recomp)";
             port.noticeUntil = port.tick + 240;
@@ -789,7 +797,7 @@ int RunWindowed(Port &port) {
         }
         loops++;
         SDL_Event ev;
-        if (port.typing && (!port.net || port.connecting)) {
+        if (port.typing && !port.Chat()) { // (this fork: either session's)
             chatOpen(false); // (the match over, or waited for again)
         }
         while (SDL_PollEvent(&ev)) {
@@ -797,26 +805,40 @@ int RunWindowed(Port &port) {
                 continue;
             }
             if (port.typing && ev.type == SDL_EVENT_TEXT_INPUT) {
-                if (openedByT && SDL_GetTicks() - openedByT < 250 && (!strcmp(ev.text.text, "t") || !strcmp(ev.text.text, "T"))) {
+                // (this fork: the chat's key, T or Y)
+                if (openedByT && SDL_GetTicks() - openedByT < 250 && ev.text.text[0] && !ev.text.text[1] &&
+                    toupper(static_cast<unsigned char>(ev.text.text[0])) == port.chatKey[0]) {
                     openedByT = 0;
                     continue;
                 }
                 openedByT = 0;
-                for (const char *c = ev.text.text; *c; c++) {
-                    if (*c >= 32 && *c < 127 && port.typed.size() < Netplay::kChatMost) {
-                        port.typed += *c;
+                // (this fork: UTF-8, the keyboard layout's accents and signs, at most the chat's 60 characters)
+                for (const char *c = ev.text.text; *c;) {
+                    size_t used = 1;
+                    recomp::text::NextChar(c, strlen(c), used);
+                    if (static_cast<unsigned char>(*c) >= 32 && *c != 127 &&
+                        recomp::text::CharCount(port.typed.data(), port.typed.size()) < recomp::chat::kLineMost) {
+                        port.typed.append(c, used);
                     }
+                    c += used;
                 }
                 continue;
             }
             if (port.typing && ev.type == SDL_EVENT_KEY_DOWN) {
                 if (ev.key.scancode == SDL_SCANCODE_RETURN || ev.key.scancode == SDL_SCANCODE_KP_ENTER) {
-                    port.Say();
-                    chatOpen(false);
+                    if (port.Say()) { // (this fork: kept, said to wait, when over the rate)
+                        chatOpen(false);
+                    }
                 } else if (ev.key.scancode == SDL_SCANCODE_ESCAPE || ev.key.scancode == SDL_SCANCODE_AC_BACK) {
                     chatOpen(false);
                 } else if (ev.key.scancode == SDL_SCANCODE_BACKSPACE && !port.typed.empty()) {
-                    port.typed.pop_back();
+                    // (this fork: a whole character, UTF-8)
+                    do {
+                        port.typed.pop_back();
+                    } while (!port.typed.empty() && (static_cast<unsigned char>(port.typed.back()) & 0xC0) == 0x80);
+                    if (!port.typed.empty() && static_cast<unsigned char>(port.typed.back()) >= 0xC0) {
+                        port.typed.pop_back();
+                    }
                 }
                 continue; // (every other key the line's, as text)
             }
@@ -920,11 +942,13 @@ int RunWindowed(Port &port) {
                            (ev.key.scancode == SDL_SCANCODE_TAB && !KeyBound(SDL_SCANCODE_TAB))) {
                     // (AC_BACK: a phone's Back)
                     toggleMenu();
-                } else if (KeyBound(ev.key.scancode)) {
-                    // (a key the player has given to the game does only that)
-                } else if (port.net && ev.key.scancode == SDL_SCANCODE_T && !ev.key.repeat) {
+                } else if (port.Chat() && ev.key.scancode == chatKey && !ev.key.repeat) {
+                    // (this fork: online, the chat's key the match began with: T, Y where T is a game key, or T where
+                    // both are, which online is then the chat's)
                     chatOpen(true);
                     openedByT = port.typing ? SDL_GetTicks() : 0;
+                } else if (KeyBound(ev.key.scancode)) {
+                    // (a key the player has given to the game does only that)
                 } else if (multi && !port.menu.IsOpen() && ev.key.scancode == SDL_SCANCODE_N && !ev.key.repeat) {
                     port.Key('n');
                 } else if (ev.key.scancode == SDL_SCANCODE_F5 || ev.key.scancode == SDL_SCANCODE_F9) {
@@ -976,7 +1000,7 @@ int RunWindowed(Port &port) {
                 } else if (port.menu.IsOpen()) {
                     break;
                 } else if (ev.gbutton.button == SDL_GAMEPAD_BUTTON_RIGHT_STICK) {
-                    if (port.net) {
+                    if (port.Chat()) { // (this fork: either session's)
                         chatOpen(!port.typing);
                     } else {
                         port.Key('p');
@@ -1015,9 +1039,21 @@ int RunWindowed(Port &port) {
             toggleMenu();
         }
         port.PumpHost(); // (a match hosted from the menu, listened for, the menu open or not)
-        touch.Chat(port.net != nullptr); // (online, from the start or a match hosted from the menu)
+        touch.Chat(port.Chat() != nullptr); // (online, from the start or a match hosted from the menu; this fork: either session)
+        if (port.Chat() != chatKeyFor) {
+            // (this fork) A match to chat in, or none: the chat's key chosen from the player's keys, and the menu bar's
+            // Chat entries
+            chatKeyFor = port.Chat();
+            if (chatKeyFor) {
+                const bool t = KeyBound(SDL_SCANCODE_T), y = KeyBound(SDL_SCANCODE_Y);
+                chatKey = t && !y ? SDL_SCANCODE_Y : SDL_SCANCODE_T;
+                port.chatKey = t && !y ? "Y" : "T";
+                port.chatKeyShared = t && y;
+            }
+            BarMenus(port, bar, isFullscreen());
+        }
         if (touch.TakeZoomPress()) {
-            if (port.net) {
+            if (port.Chat()) {
                 chatOpen(!port.typing);
             } else {
                 port.zoom.Both();

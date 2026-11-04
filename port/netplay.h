@@ -24,6 +24,8 @@
 #include <string>
 #include <vector>
 
+#include "chat_link.h"
+
 namespace port {
 
 struct Port;
@@ -56,7 +58,7 @@ private:
     bool six = false; // (IPv6, and IPv4 through it)
 };
 
-class Netplay {
+class Netplay : public ChatLink { // (this fork: the chat's link, chat_link.h)
 public:
     static constexpr int kDefaultPort = 7845;
     // The packets' layout (2: the host's state sent at the start); two copies must have the same to play, and the
@@ -165,6 +167,27 @@ public:
     static constexpr size_t kChatMost = 60;
     void Say(const std::string &text);
     std::vector<std::string> TakeHeard();
+    // (this fork) ChatLink: the chat above, for the screen's (Port::Say, Port::HearChat) whichever session it is
+    Said ChatSay(const std::string &text, std::string &line) override;
+    std::vector<std::string> ChatHeard() override {
+        return TakeHeard();
+    }
+    std::string ChatName(int player) const override {
+        return Name(player);
+    }
+    int ChatLocal() const override {
+        return Local();
+    }
+    bool ChatHost() const override {
+        return Hosting();
+    }
+    bool ChatReady() const override {
+        return ended.empty();
+    }
+    bool ChatOver() const override {
+        return !ended.empty();
+    }
+    std::vector<std::string> ChatUndelivered() const override;
 
 private:
     Settings settings;

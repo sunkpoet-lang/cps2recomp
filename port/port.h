@@ -8,6 +8,7 @@
 #include "menu.h"
 #include "netplay.h"
 #include "online.h"
+#include "../recomp-common/chat.h"
 #include "present.h"
 #include "soundtrack.h"
 #include "zoom.h"
@@ -79,8 +80,10 @@ struct Options {
     uint64_t rollbackTest = 0;  // --rollback-test SEED: each frame run as online play's rollback would (RollbackTest)
     bool online = false;        // --host or --join: online play (netplay.h), as `net` says
     Netplay::Settings net;
-    std::string netSay;         // --net-say [FRAME:]TEXT: (tests) the line said in the chat at FRAME of the match (120)
-    uint64_t netSayAt = 120;
+    // --net-say [FRAME:]TEXT: (tests) the line said in the chat at FRAME of the match (120); (this fork) again for more
+    std::vector<std::pair<uint64_t, std::string>> netSays;
+    std::string nick;           // (this fork) --nick NAME: this player's name in either online session's chat
+    std::string chatLog;        // (this fork) --chat-log DIR: the chat's log of each match in DIR (none without it)
     std::string netTyping;      // --net-typing TEXT: (pictures) a line shown as being typed, all through the match
     OnlineOptions gekko;        // (this fork) --gekko-host, --gekko-join, --gekko-delay, --gekko-stress: GekkoNet (online.h)
 };
@@ -247,8 +250,28 @@ struct Port {
     bool typing = false;
     std::string typed;
     uint64_t chatHintUntil = 0; // (how to chat, said under the chat for a while as a match begins)
-    void Say();       // (the typed line: sent, and said with the rest)
+    bool Say();       // (the typed line: sent, and said with the rest; this fork: false when kept, over the rate)
     void HearChat();  // (the other side's lines that have come)
+    // (this fork) The chat over either online session: Tommy's netplay (`net`) or ForkAde's GekkoNet (`gekkoChat`,
+    // the window's Online while it plays); null while there is no match to chat in. ChatTick, every tick of a match:
+    // the lines that came, the tests' --net-say lines, the log (--chat-log) and, at the end, what was not delivered.
+    ChatLink *gekkoChat = nullptr;
+    ChatLink *Chat() const;
+    void ChatTick();
+    std::string ChatShownName(const ChatLink &link, int player) const; // (the name, or "Player 1" / "Player 2")
+    std::string chatKey = "T";    // (the window's choice for the match: T, or Y where T is a game key)
+    bool chatKeyShared = false;   // (T and Y both game keys: T opens the chat online all the same)
+    uint64_t chatWaitUntil = 0;   // (a line kept over the rate: "wait a moment" said until then)
+    // (this fork) The match's chat as Game > Chat history shows it, and its log
+    struct ChatRecord {
+        std::string time, who, text;
+        bool own, delivered;
+    };
+    std::vector<ChatRecord> chatHistory;
+    bool historyOpen = false;
+    std::unique_ptr<recomp::chat::Log> chatLog;
+    const ChatLink *chatMatch = nullptr;
+    bool chatEnded = false;
     bool StartOnline(std::string &error);
     // The in-game menu's Online page (issue #196): a match hosted while the game goes on as the player's own, offline
     // (its modes, cheats, the menu, save states, pause: all as without it), `waitingHost` listening meanwhile (PumpHost:

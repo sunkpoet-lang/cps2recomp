@@ -33,6 +33,8 @@
 #include <filesystem>
 #include <thread>
 
+#include "../recomp-common/chat.h"
+
 using namespace cps2recomp;
 
 namespace port {
@@ -59,17 +61,11 @@ namespace {
         kChatAck = 10, // either: how many lines of the chat have come, all before that one
     };
 
-    // A name or a line of the chat as the screen's font has it (ASCII's letters, digits and marks), at most `most` of
-    // them, spaces at its ends taken off
+    // A name or a line of the chat, at most `most` characters, spaces at its ends taken off (this fork: UTF-8, its
+    // controls and invisible marks taken out, as ForkAde's chat protocol cleans text: recomp-common's chat.h; the
+    // screen's font draws the Spanish letters too, and "?" for the rest)
     std::string Printable(const std::string &text, size_t most) {
-        std::string out;
-        for (const char c : text) {
-            if (out.size() < most && c >= 32 && c < 127) {
-                out += c;
-            }
-        }
-        const size_t start = out.find_first_not_of(' ');
-        return start == std::string::npos ? std::string() : out.substr(start, out.find_last_not_of(' ') - start + 1);
+        return recomp::chat::Printable(text, most);
     }
 
     struct Writer {
@@ -1084,6 +1080,24 @@ void Netplay::Say(const std::string &text) {
         unheard.push_back({said++, line});
         SendChat(0);
     }
+}
+
+// (this fork) ChatLink
+ChatLink::Said Netplay::ChatSay(const std::string &text, std::string &line) {
+    line = Printable(text, kChatMost);
+    if (line.empty()) {
+        return Said::Empty;
+    }
+    Say(text);
+    return Said::Sent;
+}
+
+std::vector<std::string> Netplay::ChatUndelivered() const {
+    std::vector<std::string> lines;
+    for (const auto &line : unheard) {
+        lines.push_back(line.second);
+    }
+    return lines;
 }
 
 std::vector<std::string> Netplay::TakeHeard() {
