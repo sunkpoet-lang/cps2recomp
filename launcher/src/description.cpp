@@ -328,9 +328,13 @@ launcher::Description describe_game(const GameInfo& game) {
     // its stress test: Super Turbo and SF2 CE), through the tunnel beside the launcher (the ONLINE card: the host's game
     // waits on 7845, the other's joins the tunnel's port)
     if (!strcmp(game.board, "neogeo") || !strcmp(game.id, "ssf2t") || !strcmp(game.id, "sf2ce")) {
-        d.online.port = 7845;
-        d.online.arguments = [](const std::string& address) {
-            return address.empty() ? std::vector<std::string>{"--host", "7845"} : std::vector<std::string>{"--join", address};
+        // (the Neo Geo port's own --host and --join; the CPS games' GekkoNet session, --gekko-host and --gekko-join,
+        // apart from Tommy's netplay's)
+        const bool neogeo = !strcmp(game.board, "neogeo");
+        d.tunnel.port = 7845;
+        d.tunnel.arguments = [neogeo](const std::string& address) {
+            return address.empty() ? std::vector<std::string>{neogeo ? "--host" : "--gekko-host", "7845"}
+                                   : std::vector<std::string>{neogeo ? "--join" : "--gekko-join", address};
         };
     }
     d.controls = {{"Keys", keep(std::string("Esc, F1, the left stick's click, or Start and Select together: the in-game menu (") + (forAll ? "training mode and the other modes" : "the game's options") + ", save states, coin, cheats, quit)   P / O: stop, one frame on   - / =: speed   " + (forAll ? "Backspace: start over (training)   " : "") + "F5 / F9: save and load a state   F6 / F7: slot   F2: operator's test switch   F11: full screen. On a gamepad: right stick's click stops the game and starts it again, left trigger goes on a frame while it is stopped, left shoulder starts over. (A key or button given to the game above does only that.)")}};
@@ -507,8 +511,8 @@ launcher::Description describe_outside(const OutsideGame& game) {
     d.mute_argument = nullptr;  // (the program's own menu has the volume)
     if (game.netplay_port) {
         // (after "--", the bridge passes them to the program: outside_bridge.cpp)
-        d.online.port = game.netplay_port;
-        d.online.arguments = [port = game.netplay_port](const std::string& address) {
+        d.tunnel.port = game.netplay_port;
+        d.tunnel.arguments = [port = game.netplay_port](const std::string& address) {
             return address.empty() ? std::vector<std::string>{"--", "--host", std::to_string(port)}
                                    : std::vector<std::string>{"--", "--join", address};
         };
