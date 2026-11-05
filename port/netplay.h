@@ -25,6 +25,7 @@
 #include <vector>
 
 #include "chat_link.h"
+#include "match_link.h"
 
 namespace port {
 
@@ -58,8 +59,9 @@ private:
     bool six = false; // (IPv6, and IPv4 through it)
 };
 
-class Netplay : public ChatLink { // (this fork: the chat's link, chat_link.h)
+class Netplay : public ChatLink, public MatchLink { // (this fork: the chat's link, chat_link.h)
 public:
+    MatchView ReadMatch() const override;
     static constexpr int kDefaultPort = 7845;
     // The packets' layout (2: the host's state sent at the start); two copies must have the same to play, and the
     // lobby shows only matches of this one (the launcher asks with it too)
@@ -190,6 +192,7 @@ public:
     std::vector<std::string> ChatUndelivered() const override;
 
 private:
+    bool matchStarted = false; // presentation phase, never part of rollback state
     Settings settings;
     UdpSocket socket;
     // (the handshake: the hello or the welcome, sent again until answered)

@@ -475,6 +475,7 @@ void Netplay::Welcome(Port &port) {
 }
 
 bool Netplay::Begin(Port &port, std::string &error) {
+    matchStarted = false;
     if (!socket.Open(settings.hosting ? settings.port : 0, error)) {
         return false;
     }
@@ -903,7 +904,8 @@ int Netplay::Waiting(Port &port, std::string &error) {
         if (got >= 0) {
             lastHeard = now;
             fprintf(stderr, "online: the match is on: you are player 1 (%d frame%s of delay)\n", delay, delay == 1 ? "" : "s");
-            return 1;
+            matchStarted = true;
+                return 1;
         }
         if (found && now - lastHeard > 5000) {
             // (they went quiet before it began: waited for again, and the game, if it is played meanwhile, goes on)
@@ -1013,6 +1015,7 @@ int Netplay::Waiting(Port &port, std::string &error) {
                 port.PutBackState(raw);
                 lastHeard = now;
                 fprintf(stderr, "online: the match is on: you are player 2 (%d frame%s of delay)\n", delay, delay == 1 ? "" : "s");
+                matchStarted = true;
                 return 1;
             }
             continue;
@@ -1409,6 +1412,20 @@ void Netplay::Report(bool last) {
             static_cast<unsigned long long>(rollbacks - reportedRollbacks), static_cast<unsigned long long>(rerun), mostRerun,
             static_cast<unsigned long long>(waits), worst * 1000, static_cast<unsigned long long>(over));
     reportedRollbacks = rollbacks;
+}
+
+
+MatchView Netplay::ReadMatch() const {
+    MatchView view;
+    view.phase = !ended.empty() ? MatchView::Phase::Ended : matchStarted ? MatchView::Phase::Playing
+                 : found ? MatchView::Phase::Connecting : MatchView::Phase::Waiting;
+    view.hosting = Hosting(); view.arcade = Arcade(); view.found = Found(); view.hostIn = HostIn();
+    view.failed = failed; view.left = left; view.lost = lost; view.listed = Listed();
+    view.local = Local(); view.ping = Ping(); view.delay = Delay(); view.silentMs = Silent();
+    view.names = {Name(0), Name(1)};
+    view.message = ended.empty() ? (matchStarted ? "" : waiting) : ended;
+    view.code = code; view.invited = Invited(); view.invitation = Invitation();
+    return view;
 }
 
 } // namespace port

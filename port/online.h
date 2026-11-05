@@ -27,6 +27,7 @@
 #include <vector>
 
 #include "chat_link.h"
+#include "match_link.h"
 
 namespace recomp::chat {
 class Channel;
@@ -50,9 +51,10 @@ struct OnlineOptions {
 // (this fork) The session also carries the in-game chat (ChatLink): ForkAde's docs/chat-protocol.md, its C and A
 // packets on the session's socket, never GekkoNet's, and each player's name after a 0 byte in the hello, outside the
 // part both sides compare
-class Online : public ChatLink {
+class Online : public ChatLink, public MatchLink {
 public:
     enum class Status { Waiting, Connecting, Playing, Ended };
+    MatchView ReadMatch() const override;
 
     Online() = default;
     Online(const Online &) = delete;

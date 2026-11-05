@@ -255,6 +255,8 @@ struct Port {
     // (this fork) The chat over either online session: Tommy's netplay (`net`) or ForkAde's GekkoNet (`gekkoChat`,
     // the window's Online while it plays); null while there is no match to chat in. ChatTick, every tick of a match:
     // the lines that came, the tests' --net-say lines, the log (--chat-log) and, at the end, what was not delivered.
+    MatchLink *gekkoMatch = nullptr; // non-owning; Online unregisters before it dies
+    MatchLink *Match() const;
     ChatLink *gekkoChat = nullptr;
     ChatLink *Chat() const;
     void ChatTick();

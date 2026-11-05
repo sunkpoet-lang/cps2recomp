@@ -304,6 +304,9 @@ void Online::Stop() {
         m_socket = nullptr;
     }
     if (m_port) {
+        if (m_port->gekkoMatch == this) {
+            m_port->gekkoMatch = nullptr;
+        }
         TheGame().online = false;
         m_port->gekkoOnline = false;
         if (m_port->gekkoChat == this) {
@@ -313,6 +316,10 @@ void Online::Stop() {
 }
 
 bool Online::Start(Port &port, const OnlineOptions &options, std::string &error) {
+    if (port.Match()) {
+        error = "An online session is already active";
+        return false;
+    }
     m_port = &port;
     m_options = options;
     m_options.delay = std::clamp(m_options.delay, 0, kPredictionWindow);
@@ -401,6 +408,7 @@ bool Online::Start(Port &port, const OnlineOptions &options, std::string &error)
     m_status = Status::Waiting;
     m_message = host ? "Waiting for the other player (port " + std::to_string(options.port) + ")"
                      : "Calling " + options.host + ":" + std::to_string(options.port);
+    port.gekkoMatch = this;
     fprintf(stderr, "online: %s\n", m_message.c_str());
     return true;
 }
@@ -662,6 +670,28 @@ std::vector<std::string> Online::ChatUndelivered() const {
 
 float Online::FramesAhead() const {
     return m_session && m_status == Status::Playing ? gekko_frames_ahead(m_session) : 0.0f;
+}
+
+
+MatchView Online::ReadMatch() const {
+    MatchView view;
+    switch (m_status) {
+    case Status::Waiting: view.phase = MatchView::Phase::Waiting; break;
+    case Status::Connecting: view.phase = MatchView::Phase::Connecting; break;
+    case Status::Playing: view.phase = MatchView::Phase::Playing; break;
+    case Status::Ended: view.phase = MatchView::Phase::Ended; break;
+    }
+    view.hosting = ChatHost(); view.found = m_heard;
+    view.local = ChatLocal(); view.delay = m_options.delay; view.failed = m_failed;
+    view.names = {ChatName(0), ChatName(1)};
+    view.message = Message(); view.stats = Stats();
+    if (m_session && m_status == Status::Playing && m_options.mode != OnlineOptions::Mode::Stress) {
+        GekkoNetworkStats stats{};
+        gekko_network_stats(m_session, m_remote, &stats);
+        view.ping = static_cast<int>(stats.last_ping);
+    }
+    // Arcade, code, invitations, leave/loss reasons and silence timing await their flow implementation.
+    return view;
 }
 
 } // namespace port

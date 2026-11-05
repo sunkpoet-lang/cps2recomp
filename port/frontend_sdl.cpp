@@ -1397,15 +1397,17 @@ int RunWindowed(Port &port) {
             // playing the ping, delay and rollbacks in a corner
             const int across = port.ShownWidth(), lines = Video::kHeight;
             const recomp::text::Canvas canvas{shown.data(), across, lines};
-            const std::string &message = online.Message();
+            const MatchLink &link = online;
+            const MatchView match = link.ReadMatch();
+            const std::string &message = match.message;
             if (!message.empty()) {
                 const float wide = recomp::text::TextWidth(message.c_str(), 1);
                 const float x = (across - wide) / 2, y = lines / 2 - 6;
                 canvas.Fill(x - 6, y - 5, wide + 12, 18, {20, 22, 30, 230});
-                const recomp::text::Color colour = online.Failed() ? recomp::text::Color{255, 120, 110, 255} : recomp::text::Color{255, 255, 255, 255};
+                const recomp::text::Color colour = match.failed ? recomp::text::Color{255, 120, 110, 255} : recomp::text::Color{255, 255, 255, 255};
                 canvas.Text(x, y, 1, 0, colour, message.c_str());
             }
-            const std::string stats = online.Stats();
+            const std::string &stats = match.stats;
             if (!stats.empty()) {
                 const float wide = recomp::text::TextWidth(stats.c_str(), 1);
                 canvas.Fill(across - wide - 6, lines - 12, wide + 4, 11, {20, 22, 30, 160});

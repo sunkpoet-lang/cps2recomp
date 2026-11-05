@@ -1156,10 +1156,11 @@ namespace {
 constexpr uint64_t kNextGameWait = 150; // ticks (so stopped too)
 
 // (hosting a player invited from the launcher's waiting room: whether they have been asked, or said no)
-std::string InvitationLine(const Netplay &net) {
-    return net.Invitation() == "declined" ? net.Invited() + " declined"
-           : net.Invitation() == "away"   ? net.Invited() + " couldn't be invited"
-                                          : "Invited " + net.Invited();
+std::string InvitationLine(const MatchLink &link) {
+    const MatchView match = link.ReadMatch();
+    return match.invitation == "declined" ? match.invited + " declined"
+           : match.invitation == "away"   ? match.invited + " couldn't be invited"
+                                          : "Invited " + match.invited;
 }
 } // namespace
 
@@ -1394,15 +1395,16 @@ void Port::Shown(std::vector<uint32_t> &pixels, std::vector<SDL_Rect> *panels) c
         status(hostNote.c_str(), said++ * 14);
     }
     if (net && !connecting) {
+        const MatchView match = Match()->ReadMatch();
         char text[64] = "";
-        if (net->Silent() > 1000) {
+        if (match.silentMs.value_or(0) > 1000) {
             snprintf(text, sizeof(text), "WAITING FOR THE OTHER PLAYER");
         } else if (FeatureOn("online_ping") && FeatureOn("online_delay")) {
-            snprintf(text, sizeof(text), "PING %d ms   DELAY %d", net->Ping(), net->Delay());
+            snprintf(text, sizeof(text), "PING %d ms   DELAY %d", match.ping, match.delay);
         } else if (FeatureOn("online_ping")) {
-            snprintf(text, sizeof(text), "PING %d ms", net->Ping());
+            snprintf(text, sizeof(text), "PING %d ms", match.ping);
         } else if (FeatureOn("online_delay")) {
-            snprintf(text, sizeof(text), "DELAY %d", net->Delay());
+            snprintf(text, sizeof(text), "DELAY %d", match.delay);
         }
         if (*text) {
             status(text, said++ * 14);
@@ -1441,6 +1443,7 @@ void Port::Shown(std::vector<uint32_t> &pixels, std::vector<SDL_Rect> *panels) c
     }
     // (online: each player's name under their side's life bar, and under it a win streak of two or more)
     if (net && !connecting) {
+        const MatchView match = Match()->ReadMatch();
         const recomp::text::Canvas canvas{pixels.data(), across, Video::kHeight};
         auto under = [&](int side, float y, const std::string &text, recomp::text::Color colour) {
             const float width = recomp::text::TextWidth(text.c_str(), 1);
@@ -1453,7 +1456,7 @@ void Port::Shown(std::vector<uint32_t> &pixels, std::vector<SDL_Rect> *panels) c
         };
         for (int side = 0; side < 2; side++) {
             float y = 38.0f;
-            const std::string name = net->Name(side);
+            const std::string &name = match.names[side];
             if (!FeatureOn("online_hide_names") && !name.empty()) {
                 under(side, y, name, {255, 255, 255, 255});
                 y += 12;
@@ -2153,6 +2156,12 @@ void Port::HearChat() {
 }
 
 // (this fork) The chat's link: Tommy's netplay while its match is on, else ForkAde's GekkoNet session while it plays
+MatchLink *Port::Match() const {
+    if (net) { return net.get(); }
+    if (gekkoMatch) { return gekkoMatch; }
+    return waitingHost.get();
+}
+
 ChatLink *Port::Chat() const {
     if (net) {
         return connecting || !net->ChatReady() ? nullptr : net.get();
@@ -2257,7 +2266,7 @@ void Port::HostFromMenu() {
         StopHosting(); // (the row again: Stop hosting)
         return;
     }
-    if (net || opt.headless) {
+    if (Match() || gekkoOnline || opt.headless) {
         return;
     }
     Netplay::Settings settings = opt.net;
@@ -2442,14 +2451,15 @@ void Port::ArcadeFrame() {
 }
 
 void Port::Matched() {
+    const MatchView match = Match()->ReadMatch();
     connecting = false;
     chatHintUntil = tick + kChatTicks;
     // (the host's player, playing while it waited, is in already; the joining side is told so in the welcome)
-    cameIn = net->Arcade() && cameIn;
-    otherIn = !net->Hosting() && net->HostIn();
-    fprintf(stderr, "online: player 1 %s, player 2 %s\n", net->Name(0).empty() ? "(no name)" : net->Name(0).c_str(),
-            net->Name(1).empty() ? "(no name)" : net->Name(1).c_str());
-    if (net->Arcade()) {
+    cameIn = match.arcade && cameIn;
+    otherIn = !match.hosting && match.hostIn;
+    fprintf(stderr, "online: player 1 %s, player 2 %s\n", match.names[0].empty() ? "(no name)" : match.names[0].c_str(),
+            match.names[1].empty() ? "(no name)" : match.names[1].c_str());
+    if (match.arcade) {
         fprintf(stderr, "online: the match begins after %llu frames of the host's play\n", static_cast<unsigned long long>(frame));
     }
     streak[0] = streak[1] = roundsWon[0] = roundsWon[1] = 0;
@@ -2458,7 +2468,7 @@ void Port::Matched() {
     frame = 0; // (the match's frames count from its start, on both sides)
     // (the hashes compared leave out the picture: frames run again are not drawn)
     opt.hashNoPicture = true;
-    if (net->Local() != 0) {
+    if (match.local != 0) {
         opt.eepromPath.clear(); // (the board settings are the host's, for this match: the player's own are left as they are)
     }
     machine->SetBoardTiming(FeatureOn("arcade_timing"));
