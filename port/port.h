@@ -85,6 +85,8 @@ struct Options {
     std::string nick;           // (this fork) --nick NAME: this player's name in either online session's chat
     std::string chatLog;        // (this fork) --chat-log DIR: the chat's log of each match in DIR (none without it)
     std::string netTyping;      // --net-typing TEXT: (pictures) a line shown as being typed, all through the match
+    bool forkadeOnline = false;
+    std::string forkadeService, forkadeVersion = "0.1.0-beta";
     OnlineOptions gekko;        // (this fork) --gekko-host, --gekko-join, --gekko-delay, --gekko-stress: GekkoNet (online.h)
 };
 
@@ -283,6 +285,7 @@ struct Port {
     // own game and features are back (BackToSolo): still hosted with the same code when the other player left, not
     // when this one did.
     std::unique_ptr<Netplay> waitingHost;
+    int forkadeHostRequest = 0; // frontend boundary: 1 toggle, 2 copy
     void HostFromMenu();
     void PumpHost();
     void MatchComing();

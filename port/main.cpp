@@ -639,6 +639,8 @@ namespace {
 #endif
 
 bool Port::Init(std::string &error) {
+    if (opt.forkadeOnline) TheGame().commands.push_back({"forkade_copy_code", "Online", "Copy room code",
+        "Copy this hosted match's code to invite a friend.", nullptr});
 #ifndef GAME_BOARD
 #define GAME_BOARD ""
 #endif
@@ -827,6 +829,8 @@ bool Port::Init(std::string &error) {
     }
     SoundtrackFollow();
     machine->SetBoardTiming(FeatureOn("arcade_timing"));
+    if(opt.forkadeOnline)for(auto& command:TheGame().commands)if(!strcmp(command.name,"online_host"))
+        command.description="The game resets to the title and waits for another player. Share the displayed code or use Copy room code. Choose again to stop hosting.";
     return true;
 }
 
@@ -1032,7 +1036,10 @@ uint32_t Port::StateHash() const {
 }
 
 void Port::MenuAct(Menu::Action action) {
-    if (gekkoOnline && action != Menu::Action::None && action != Menu::Action::Coin && action != Menu::Action::Quit) {
+    const auto command=menu.Command();
+    const bool roomCommand=opt.forkadeOnline && action==Menu::Action::Command && command<TheGame().commands.size() &&
+        (!strcmp(TheGame().commands[command].name,"online_host") || !strcmp(TheGame().commands[command].name,"forkade_copy_code"));
+    if (gekkoOnline && !roomCommand && action != Menu::Action::None && action != Menu::Action::Coin && action != Menu::Action::Quit) {
         menu.Note("Not while playing online.");
         return;
     }
@@ -1088,6 +1095,11 @@ void Port::MenuAct(Menu::Action action) {
 }
 
 void Port::RunCommand(size_t index) {
+    if (opt.forkadeOnline && index < TheGame().commands.size() &&
+        !strcmp(TheGame().commands[index].name, "forkade_copy_code")) {
+        forkadeHostRequest = 2;
+        return;
+    }
     const auto &commands = TheGame().commands;
     if (index < commands.size() && !strcmp(commands[index].name, "online_host")) {
         HostFromMenu();
@@ -2262,6 +2274,11 @@ namespace {
 
 void Port::HostFromMenu() {
     menu.Close();
+    if (opt.forkadeOnline) {
+        if (!menu.hosting && (Match() || gekkoOnline || opt.headless)) return;
+        forkadeHostRequest = 1;
+        return;
+    }
     if (waitingHost) {
         StopHosting(); // (the row again: Stop hosting)
         return;
@@ -2294,6 +2311,7 @@ void Port::HostFromMenu() {
 }
 
 void Port::PumpHost() {
+    if (opt.forkadeOnline) return;
     menu.hosting = waitingHost != nullptr;
     if (!waitingHost) {
         return;
@@ -2989,6 +3007,17 @@ bool ParseArgs(int argc, char **argv, port::Options &o) {
                 say.erase(0, colon + 1);
             }
             o.netSays.push_back({at, say});
+        } else if (a == "--forkade-online") {
+#ifdef FORKADE_GAME_BROKER
+            o.forkadeOnline = true;
+#else
+            fprintf(stderr, "This build does not include the ForkAde game broker.\n");
+            return false;
+#endif
+        } else if (a == "--forkade-service") {
+            o.forkadeService = next();
+        } else if (a == "--forkade-version") {
+            o.forkadeVersion = next();
         } else if (a == "--nick") {
             // (this fork) either session's name for this player (ForkAde's launcher's nickname)
             o.nick = next();

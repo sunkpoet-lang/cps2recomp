@@ -172,3 +172,18 @@ foreach (target ${GAME} ${GAME}-check)
     target_compile_options(${target} PRIVATE -fsigned-char)
     target_compile_definitions(${target} PRIVATE RECOMP_VERSION="${RECOMP_VERSION}")
 endforeach ()
+
+
+# ForkAde's optional in-game room owner; normal builds retain Tommy's menu path.
+set(FORKADE_BROKER_DIR "" CACHE PATH "Optional ForkAde product sources")
+if(FORKADE_BROKER_DIR)
+    if(NOT WIN32)
+        message(FATAL_ERROR "The initial ForkAde game broker targets the Windows beta")
+    endif()
+    set_source_files_properties(port/main.cpp port/frontend_sdl.cpp PROPERTIES
+        COMPILE_DEFINITIONS FORKADE_GAME_BROKER
+        INCLUDE_DIRECTORIES "${FORKADE_BROKER_DIR}/native;${FORKADE_BROKER_DIR}/launcher;${CMAKE_SOURCE_DIR}/recomp-common/launcher/src")
+    foreach(target ${GAME} ${GAME}-check)
+        target_link_libraries(${target} PRIVATE bcrypt)
+    endforeach()
+endif()
