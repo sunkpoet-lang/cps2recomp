@@ -222,9 +222,8 @@ void BarMenus(Port &port, recomp::MenuBar &bar, bool fullscreen) {
     port.menu.AddBarEntries(menus, true, options);
     if(port.opt.forkadeOnline) {
         std::vector<recomp::BarEntry> room;
-        const std::string host=port.menu.hosting?"Stop hosting":"Host a match";
         std::function<void(const std::vector<recomp::BarEntry>&)> find=[&](const auto& entries){
-            for(const auto& entry:entries){if(entry.label==host||entry.label=="Copy room code")room.push_back(entry);find(entry.children);}
+            for(const auto& entry:entries){if(!strcmp(port.menu.CommandName(entry.id),"online_host")||!strcmp(port.menu.CommandName(entry.id),"forkade_copy_code"))room.push_back(entry);find(entry.children);}
         };
         for(const auto& page:menus)find(page.entries);
         std::sort(room.begin(),room.end(),[](const auto& a,const auto& b){return a.id<b.id;});
@@ -745,8 +744,9 @@ int RunWindowed(Port &port) {
         const char *who = mode == OnlineOptions::Mode::Host ? "player 1" : mode == OnlineOptions::Mode::Join ? "player 2" : "stress test";
         SDL_SetWindowTitle(window, (std::string(title) + " - online, " + who).c_str());
     }
+    uint64_t displayedEpoch=onlineOwner->Epoch();
 #ifdef FORKADE_GAME_BROKER
-    bool roomSession = false;
+    bool roomSession = false, roomWasWaiting = false;
     bool oldHashPicture = false, oldHashSound = false;
     Eeprom roomEeprom;
     std::map<std::string,int> savedFeatures;
@@ -760,6 +760,7 @@ int RunWindowed(Port &port) {
         EndSessionFeatures();port.machine->Reset();port.machine->audio.clear();port.frame=0;
         port.paused=false;port.steps=0;port.menu.SetFullSpeed();port.zoom.Forbid();
         port.opt.gekko.mode=OnlineOptions::Mode::Host;port.opt.gekko.port=7845;
+        port.opt.gekko.matchFlow=true;port.opt.gekko.arcadeWait=true;
         port.opt.gekko.name=port.opt.nick;
         roomSession=true;
         if (!onlineOwner->Start(port,port.opt.gekko,error))return false;
@@ -774,7 +775,7 @@ int RunWindowed(Port &port) {
         port.zoom.Forbid(false);port.machine->Reset();port.machine->audio.clear();port.frame=0;
         port.SoundtrackFollow();port.menu.hosting=false;
     });
-    const char* roomHome=std::getenv("CPS2RECOMP_HOME");
+    const char* roomHome=SDL_getenv("CPS2RECOMP_HOME");
     const auto roomPrefsFolder=roomHome&&*roomHome?std::filesystem::path(std::u8string(reinterpret_cast<const char8_t*>(roomHome))):LauncherFolder();
     recomp::Ini roomPrefs(roomPrefsFolder / "launcher.ini");
     if(!roomPrefsFolder.empty())roomPrefs.load();
@@ -801,12 +802,11 @@ int RunWindowed(Port &port) {
             }
             if(s.what=="command") {
                 for(const auto& command:TheGame().commands)if(s.key==command.name) {
-                    const std::string title=s.key=="online_host"&&port.menu.hosting?"Stop hosting":command.title;
                     std::vector<recomp::BarMenu> probe={{"Game",{}}};
                     port.menu.AddBarEntries(probe,true,{});
                     int picked=0;
                     std::function<void(const std::vector<recomp::BarEntry>&)> find=[&](const auto& entries){
-                        for(const auto& entry:entries){if(entry.label==title)picked=entry.id;find(entry.children);}
+                        for(const auto& entry:entries){if(s.key==port.menu.CommandName(entry.id))picked=entry.id;find(entry.children);}
                     };
                     for(const auto& page:probe)find(page.entries);
                     if(picked)port.MenuAct(port.menu.Choose(picked));
@@ -815,7 +815,8 @@ int RunWindowed(Port &port) {
             }
             SDL_Event put{};
             const SDL_WindowID id = SDL_GetWindowID(window);
-            if (s.what == "m") {
+            if (s.what == "q") {put.type=SDL_EVENT_QUIT;SDL_PushEvent(&put);}
+            else if (s.what == "m") {
                 put.type = SDL_EVENT_MOUSE_MOTION;
                 put.motion.windowID = id;
                 put.motion.x = s.x;
@@ -1121,11 +1122,18 @@ int RunWindowed(Port &port) {
             }
             if(request==2) {const bool copied=gameRoom.Copy();port.menu.Note(copied?"Room code copied.":"No hosted room code is available yet.");menuDirty=true;}
             gameRoom.Tick();
+            if(roomSession && roomWasWaiting && !onlineOwner->ArcadeWaiting()){bar.Close();port.menu.Close();menuDirty=true;}
+            roomWasWaiting=roomSession&&onlineOwner->ArcadeWaiting();
+            if(roomSession)gameRoom.Reconnecting(onlineOwner->Recovering());
             if(roomSession&&onlineOwner->GetStatus()==Online::Status::Playing)gameRoom.Admitted();
             if(roomSession&&onlineOwner->GetStatus()==Online::Status::Ended)gameRoom.Stop(onlineOwner->Message());
             if(port.menu.hosting!=gameRoom.Hosting()) {port.menu.hosting=gameRoom.Hosting();BarMenus(port,bar,isFullscreen());menuDirty=true;}
         }
 #endif
+        if(isOnline && displayedEpoch!=onlineOwner->Epoch()) {
+            displayedEpoch=onlineOwner->Epoch();if(audio)SDL_ClearAudioStream(audio);if(music)SDL_ClearAudioStream(music);
+            bar.Close();port.menu.Close();port.paused=false;port.steps=0;menuDirty=true;
+        }
         touch.Chat(port.Chat() != nullptr); // (online, from the start or a match hosted from the menu; this fork: either session)
         if (port.Chat() != chatKeyFor) {
             // (this fork) A match to chat in, or none: the chat's key chosen from the player's keys, and the menu bar's
@@ -1365,7 +1373,7 @@ int RunWindowed(Port &port) {
                 // (online, the game goes on behind the menu, as behind the in-game menu: this side's controls let go,
                 // unheard; the picture shown is the one the menu opened on)
                 const uint16_t none[2] = {};
-                onlineOwner->Tick(none);
+                onlineOwner->Tick(none,false);
                 port.machine->audio.clear();
                 paceFrame();
                 continue;
@@ -1387,7 +1395,7 @@ int RunWindowed(Port &port) {
             if (isOnline) {
                 // (online, the game goes on behind the menu, with this side's controls let go, unheard)
                 const uint16_t none[2] = {};
-                onlineOwner->Tick(none);
+                onlineOwner->Tick(none,false);
                 port.machine->audio.clear();
                 paceFrame();
                 continue;
@@ -1497,7 +1505,8 @@ int RunWindowed(Port &port) {
             const std::string &message = match.message;
             if (!message.empty()) {
                 const float wide = recomp::text::TextWidth(message.c_str(), 1);
-                const float x = (across - wide) / 2, y = lines / 2 - 6;
+                const float x = match.arcade && match.phase==MatchView::Phase::Waiting ? 5 : (across-wide)/2;
+                const float y = match.arcade && match.phase==MatchView::Phase::Waiting ? lines-28 : lines/2-6;
                 canvas.Fill(x - 6, y - 5, wide + 12, 18, {20, 22, 30, 230});
                 const recomp::text::Color colour = match.failed ? recomp::text::Color{255, 120, 110, 255} : recomp::text::Color{255, 255, 255, 255};
                 canvas.Text(x, y, 1, 0, colour, message.c_str());
@@ -1508,6 +1517,10 @@ int RunWindowed(Port &port) {
                 canvas.Fill(across - wide - 6, lines - 12, wide + 4, 11, {20, 22, 30, 160});
                 canvas.Text(across - wide - 4, lines - 11, 1, 0, {200, 220, 255, 255}, stats.c_str());
             }
+        }
+        if(port.opt.gekko.matchFlow && port.opt.shotEvery && loops%port.opt.shotEvery==0) {
+            const auto path=port.opt.shotPrefix+"flow-"+std::to_string(loops)+".png";
+            WritePng(path.c_str(),shown.data(),port.ShownWidth(),Video::kHeight);
         }
         presenter.Show(shown.data(), port.ShownWidth(), Video::kHeight, where, isZoomed ? &zoomed : nullptr);
 

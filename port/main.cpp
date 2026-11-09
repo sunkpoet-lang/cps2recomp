@@ -830,7 +830,7 @@ bool Port::Init(std::string &error) {
     SoundtrackFollow();
     machine->SetBoardTiming(FeatureOn("arcade_timing"));
     if(opt.forkadeOnline)for(auto& command:TheGame().commands)if(!strcmp(command.name,"online_host"))
-        command.description="The game resets to the title and waits for another player. Share the displayed code or use Copy room code. Choose again to stop hosting.";
+        command.description="Play arcade while waiting. A challenger starts a new match from the title. Share the code or use Copy room code; choose again to stop hosting.";
     return true;
 }
 
@@ -1454,7 +1454,9 @@ void Port::Shown(std::vector<uint32_t> &pixels, std::vector<SDL_Rect> *panels) c
         status(shotSaid.c_str(), said * 14);
     }
     // (online: each player's name under their side's life bar, and under it a win streak of two or more)
-    if (net && !connecting) {
+    const bool forkadeNames = gekkoOnline && opt.gekko.matchFlow && Match() &&
+        Match()->ReadMatch().phase == MatchView::Phase::Playing;
+    if ((net && !connecting) || forkadeNames) {
         const MatchView match = Match()->ReadMatch();
         const recomp::text::Canvas canvas{pixels.data(), across, Video::kHeight};
         auto under = [&](int side, float y, const std::string &text, recomp::text::Color colour) {
@@ -2581,6 +2583,7 @@ void Port::RunFrame() {
     SoundtrackFollow();
     machine->SetBoardTiming(FeatureOn("arcade_timing"));
     GatherInput();
+    if(gekkoArcadeWaiting)for(int player=1;player<Machine::kMaxPlayers;++player)pad[player]=0;
     if (!opt.movieRecord.empty() && !net && memcmp(pad, lastRecorded, sizeof(pad)) != 0) { // (online: Netplay records both players)
         std::copy(std::begin(pad), std::end(pad), recMovie.changes[frame].begin());
         memcpy(lastRecorded, pad, sizeof(pad));
@@ -3076,6 +3079,13 @@ bool ParseArgs(int argc, char **argv, port::Options &o) {
             if (colon != std::string::npos) {
                 o.gekko.port = static_cast<uint16_t>(atoi(v.c_str() + colon + 1));
             }
+        } else if (a == "--gekko-flow-log") {
+            o.gekko.flowLog = next();
+        } else if (a == "--gekko-checkpoint-log") {
+            o.gekko.checkpointLog=next();
+        } else if (a == "--gekko-arcade") {
+            o.gekko.arcadeWait = true;
+            o.gekko.matchFlow = true;
         } else if (a == "--gekko-delay") {
             o.gekko.delay = atoi(next());
         } else if (a == "--gekko-stress") {
@@ -3134,6 +3144,8 @@ bool ParseArgs(int argc, char **argv, port::Options &o) {
             return false;
         }
     }
+    o.gekko.matchFlow = o.gekko.matchFlow || o.forkadeOnline;
+    o.gekko.arcadeWait = o.gekko.mode==port::OnlineOptions::Mode::Host && (o.gekko.arcadeWait || o.forkadeOnline);
     return true;
 }
 
@@ -3286,13 +3298,16 @@ int main(int argc, char **argv) {
             return 1;
         }
         const bool stress = p.opt.gekko.mode == port::OnlineOptions::Mode::Stress;
-        uint64_t shown = 0;
+        uint64_t shown = 0,shownEpoch=online.Epoch();
         const uint64_t frames = p.opt.frames ? p.opt.frames : 600;
         while (shown < frames && online.GetStatus() != port::Online::Status::Ended) {
             p.frame = shown; // (the movie and the made-up play go by the frames seen)
             p.GatherInput();
             const uint16_t local[2] = {p.pad[0], stress ? p.pad[1] : uint16_t{0}};
+            const bool wasArcade=online.ArcadeWaiting();
             const int seen = online.Tick(local);
+            if(wasArcade&&!online.ArcadeWaiting())shown=0;
+            if(shownEpoch!=online.Epoch()){shown=0;shownEpoch=online.Epoch();}
             p.machine->audio.clear();
             shown += static_cast<uint64_t>(seen);
             if (!stress) {

@@ -48,6 +48,7 @@ public:
     void AddBarEntries(std::vector<recomp::BarMenu> &menus, bool withStates, const recomp::BarOptions &options = {});
     // One of those entries chosen: what the frontend is to do, as Press returns (none for the bar's other ids)
     Action Choose(int id);
+    const char* CommandName(int id) const;
     // The "Sound" row: the frontend plays nothing while this is set (--mute starts with it set)
     bool muted = false;
     bool hosting = false; // (a match hosted from the Online page, waited for: its row is Stop hosting)

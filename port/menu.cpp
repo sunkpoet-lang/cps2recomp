@@ -140,6 +140,15 @@ void Menu::AddBarEntries(std::vector<recomp::BarMenu> &menus, bool withStates, c
     }
 }
 
+const char* Menu::CommandName(int id) const {
+    recomp::MenuConfig config;
+    config.commands.resize(m_config.commands.size());config.speeds={"Full"};
+    recomp::Menu sandbox;sandbox.Configure(config);
+    const auto choice=recomp::ChooseMenuEntry(id,config,sandbox);
+    const auto& commands=cps2recomp::TheGame().commands;
+    return choice.kind==recomp::Menu::Chosen::Command && choice.id>=0 && static_cast<size_t>(choice.id)<commands.size()?commands[static_cast<size_t>(choice.id)].name:"";
+}
+
 Menu::Action Menu::Choose(int id) {
     return Did(recomp::ChooseMenuEntry(id, m_config, m_menu));
 }

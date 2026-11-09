@@ -310,7 +310,7 @@ struct Port {
     void RunOnlineFrame(const uint16_t players[2], bool again);
     // ... the input part of a frame: pad[] from the movie or the made-up play (the window sets it itself)
     void GatherInput();
-    bool gekkoOnline = false;
+    bool gekkoOnline = false, gekkoArcadeWaiting = false;
     void RunAhead();
     void SoundTest();
     void MusicTest();

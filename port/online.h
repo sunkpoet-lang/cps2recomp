@@ -21,7 +21,10 @@
 // (openspec change cps-online)
 #pragma once
 
+#include "match_flow.h"
+#include "recovery.h"
 #include <cstdint>
+#include <cstdio>
 #include <memory>
 #include <string>
 #include <vector>
@@ -45,6 +48,9 @@ struct OnlineOptions {
     std::string host;     // --join's address
     int delay = 1;
     std::string name;     // (this fork) --nick: this player's name, said in the hello (ForkAde's in-game chat)
+    bool matchFlow = false, arcadeWait = false; // explicit ForkAde presentation/solo wait; no wire change
+    std::string checkpointLog; // save-event frame and board fingerprint only
+    std::string flowLog; // optional save-event presentation counters; no game state bytes
     int chatLoss = 0;     // (this fork) --chat-loss PCT: (tests) that share of the chat's packets dropped as sent
 };
 
@@ -53,7 +59,7 @@ struct OnlineOptions {
 // part both sides compare
 class Online : public ChatLink, public MatchLink {
 public:
-    enum class Status { Waiting, Connecting, Playing, Ended };
+    enum class Status { Waiting, Connecting, Playing, Recovering, Ended };
     MatchView ReadMatch() const override;
 
     Online() = default;
@@ -65,10 +71,13 @@ public:
     bool Start(Port &port, const OnlineOptions &options, std::string &error);
     // One tick (a frame's time): the local player's controls (the stress session: both players'); the session's
     // frames are run on the port's board. Returns how many frames were run that are to be seen (0 or more).
-    int Tick(const uint16_t local[2]);
+    int Tick(const uint16_t local[2], bool advanceWaiting = true);
+    bool ArcadeWaiting() const { return m_options.arcadeWait && m_options.mode == OnlineOptions::Mode::Host && !m_heard && m_status != Status::Ended; }
     Status GetStatus() const {
         return m_status;
     }
+    bool Recovering() const { return m_recovery.Deadline()!=0 && m_status!=Status::Ended; }
+    uint64_t Epoch() const { return m_recovery.Epoch(); }
     bool Failed() const {
         return m_failed;
     }
@@ -96,6 +105,18 @@ public:
     struct Socket;
 
 private:
+    void UpdateFlowMessage();
+    bool CreateGameSession();
+    void SendControl(char kind,uint64_t epoch);
+    void PrepareRecovery();
+    void RequestRecovery();
+    bool ResetRecoveryEpoch();
+    void ApplyRecovery(const Recovery::Action& action);
+    Recovery m_recovery;
+    uint64_t m_localNonce=0,m_peerNonce=0,m_roomNonce=0;
+    bool m_prepared=false,m_everPlayed=false;
+    void PublishFlow();
+    MatchFlow m_flow;
     void Pump();
     void SendHello();
     void Events();
@@ -119,6 +140,11 @@ private:
     int m_coinFrames = 0;
     std::unique_ptr<recomp::chat::Channel> m_chat; // (this fork: the in-game chat)
     std::string m_theirName;
+    std::vector<uint8_t> m_arcadeState;
+    uint64_t m_challengerUntil = 0;
+    std::string m_lastFlowMessage;
+    std::FILE* m_checkpointLog = nullptr;
+    std::FILE* m_flowLog = nullptr;
 };
 
 } // namespace port
