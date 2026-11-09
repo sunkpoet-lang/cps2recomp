@@ -119,6 +119,9 @@ struct Game {
     // songs below it are the music (0: told by their data)
     uint32_t songTable = 0, songCount = 0, musicBelow = 0;
     std::vector<Song> songs;
+    // Optional read-only completed-match result for opted-in online presentation:
+    // 0 pending, 1/2 winning side, 3 draw. Not a training/battle registration.
+    int (*onlineMatchResult)() = nullptr;
 };
 Game &TheGame();
 // The game's sources fill it in (games/<id>/src; runtime/no_game.cpp when a game has none)

@@ -67,3 +67,21 @@ make GAME=sf2hf check-online FRAMES=6000
 The online check uses two local peers and simulated packet delay/loss; it does not test Internet play.
 The classic sound program runs on the Z80. `check-sound`'s QSound high-level-driver comparison is not applicable.
 Windows is the tested platform for this contribution; macOS/Linux builds still need verification.
+
+
+### Opt-in online match results
+
+The minimal src/game.cpp observes completed human matches for ForkAde's
+opted-in GekkoNet flow. It registers no training features and changes no game
+RAM or saved board state. The per-game mapping was checked with this exact
+configured set, original executables and movies/streaks.txt. It reads the
+native round counters and human flags; one completed match is one result,
+not an extra round to add to another best-of-three counter.
+
+Shared result interpretation lives in fight/classic_sf2_result.h.
+Boot/attract, selection, CPU-only and unfinished matches do not award streaks.
+Raw byte indices from another emulator must not be treated as native 68000
+bus addresses. Native trace checks place the human flags at FF864C/FF894C
+and round counters at FF864E/FF894E, with mode/phase at FF8004/FF8008.
+The normal Tommy netplay route is unchanged. Local peer tests are distinct
+from Internet acceptance; build/test receipts are kept outside the source tree.
