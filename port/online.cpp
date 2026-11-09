@@ -664,6 +664,11 @@ int Online::Tick(const uint16_t local[2], bool advanceWaiting) {
     UpdateFlowMessage();
     m_ticks++;
     m_shown = 0;
+    // (this fork) The window's clock, as Port::Tick moves it offline and in Tommy's netplay: the chat's lines, its
+    // hint and the notices last for so many ticks of it, and a GekkoNet match never goes through Port::Tick
+    if (m_options.mode != OnlineOptions::Mode::Stress) {
+        m_port->tick++;
+    }
     // (this fork) After the tick, whatever it did, the chat's (Port::ChatTick): lines heard, the log, the end
     struct ChatAfter {
         Port *port;
@@ -697,7 +702,6 @@ int Online::Tick(const uint16_t local[2], bool advanceWaiting) {
     if (!m_heard) {
         if(ArcadeWaiting() && advanceWaiting) {
             m_port->pad[0]=mine;
-            m_port->tick++;
             m_port->ArcadeFrame();
             return 1;
         }
