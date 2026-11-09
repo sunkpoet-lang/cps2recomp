@@ -10,6 +10,8 @@
 //   <game> --host [PORT]         player 1, waiting on that UDP port (7845)
 //   <game> --join HOST:PORT      player 2
 //   <game> --delay N             the local controls held back N frames (0-8; 1): fewer frames to take back
+//   <game> --watch HOST:PORT     (this fork) a spectator: the match as the host's game confirms it, a little behind
+//                                (openspec change match-spectators)
 //   <game> --stress              no network: GekkoNet's stress session, rolling back every frame to check that the
 //                                game comes out the same (a game passes it before it is played online)
 //
@@ -43,7 +45,7 @@ namespace port {
 struct Port;
 
 struct OnlineOptions {
-    enum class Mode { Off, Host, Join, Stress } mode = Mode::Off;
+    enum class Mode { Off, Host, Join, Stress, Watch } mode = Mode::Off;
     uint16_t port = 7845; // the host's, or the one --join goes to
     std::string host;     // --join's address
     int delay = 1;
@@ -52,6 +54,8 @@ struct OnlineOptions {
     std::string checkpointLog; // save-event frame and board fingerprint only
     std::string flowLog; // optional save-event presentation counters; no game state bytes
     int chatLoss = 0;     // (this fork) --chat-loss PCT: (tests) that share of the chat's packets dropped as sent
+    int spectators = 6;   // (this fork) the host's: how many may watch (0: none, the match refuses them)
+    int spectatorDelay = 15; // (this fork) a spectator's: the frames it stays behind the confirmed match
 };
 
 // (this fork) The session also carries the in-game chat (ChatLink): ForkAde's docs/chat-protocol.md, its C and A
@@ -104,7 +108,19 @@ public:
     // (the adapter's, for GekkoNet's callbacks)
     struct Socket;
 
+    // (this fork) How many spectators are watching (the host's), and whether this side is one
+    int Watching() const;
+    bool Spectating() const { return m_options.mode == OnlineOptions::Mode::Watch; }
+
 private:
+    std::string Mismatch(const std::vector<uint8_t> &said, bool recoveryCompatible) const;
+    std::vector<uint8_t> HelloOut() const;
+    void SendStatus(int phase);
+    void ApplyStatus();
+    void WatchHellos();
+    void AddSpectators();
+    void SpectatorLeft(int handle);
+    bool CreateSpectateSession();
     void UpdateFlowMessage();
     bool CreateGameSession();
     void SendControl(char kind,uint64_t epoch);
@@ -145,6 +161,17 @@ private:
     std::string m_lastFlowMessage;
     std::FILE* m_checkpointLog = nullptr;
     std::FILE* m_flowLog = nullptr;
+    // (this fork: spectators) the host's: GekkoNet's name for each one (its address is the socket's), its nickname and handle (-1
+    // until the match runs)
+    struct Spectator {
+        std::string name, nick;
+        int handle = -1;
+    };
+    std::vector<Spectator> m_spectators;
+    // (this fork: spectators) what the host's last status said: its phase (0 waiting for a challenger, 1 connecting,
+    // 2 playing, 3 reconnecting, 4 ended), how many watch, and the players' names
+    int m_hostPhase = -1, m_seenWatching = 0;
+    std::string m_statusNames[2];
 };
 
 } // namespace port

@@ -24,6 +24,7 @@
 #include <charconv>
 #include <random>
 #include <deque>
+#include <map>
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -48,8 +49,12 @@ using cps2recomp::Machine;
 using cps2recomp::TheGame;
 
 namespace {
-    // Every packet starts with these three bytes and a kind: H, hello (before GekkoNet's own); G, GekkoNet's
+    // Every packet starts with these three bytes and a kind: H, hello (before GekkoNet's own); G, GekkoNet's;
+    // (this fork) W, a spectator's hello; X, the host's refusal, with its reason; Q, the host's status, to the other
+    // player and each spectator four times a second: the room and epoch (big-endian), the phase, how many watch, the
+    // two streaks, then the players' names, each ended by a 0 byte
     constexpr char kTag[3] = {'N', 'G', 'O'};
+    constexpr int kMostSpectators = 6; // (the tunnel's eight guests: the opponent, six spectators, one kept free)
 
     // (this fork: the chat's clock, in milliseconds)
     uint64_t NowMs() {
@@ -151,6 +156,33 @@ struct Online::Socket {
     std::vector<GekkoNetResult *> handedOver;    // (what receive_data last returned: the array is ours)
     std::vector<std::pair<sockaddr_in, std::vector<uint8_t>>> hellos;
     std::vector<std::pair<char, std::vector<uint8_t>>> forChat; // (this fork: the chat's C and A, from the peer)
+    // (this fork: spectators) the host's: each spectator's address and the name GekkoNet knows it by ("spec1" ...);
+    // their hellos as they come; the spectator's: the host's refusal
+    std::vector<std::pair<sockaddr_in, std::string>> watchers;
+    std::vector<std::pair<sockaddr_in, std::vector<uint8_t>>> watchHellos;
+    std::deque<std::string> forGekkoFrom; // (who each of forGekko's packets came from)
+    std::string refused;
+    std::map<std::string, uint64_t> watcherHeard; // (the host's: when each spectator was last heard)
+    std::vector<uint8_t> status;                   // (the host's last Q, as the others got it)
+    uint64_t statusMs = 0;
+    uint64_t sentToPeer = 0, sentToWatchers = 0, packetsToWatchers = 0; // (bytes sent, for the measurements)
+
+    const std::string *WatcherName(const sockaddr_in &from) const {
+        for (const auto &[at, name] : watchers) {
+            if (Same(at, from)) {
+                return &name;
+            }
+        }
+        return nullptr;
+    }
+    const sockaddr_in *WatcherAt(const char *name, size_t size) const {
+        for (const auto &[at, one] : watchers) {
+            if (one.size() == size && !memcmp(one.data(), name, size)) {
+                return &at;
+            }
+        }
+        return nullptr;
+    }
 
     ~Socket() {
         if (handle != kNoSocket) {
@@ -176,6 +208,11 @@ struct Online::Socket {
             error = "no socket";
             return false;
         }
+        // (this fork: spectators) room for a burst: GekkoNet sends a late spectator the match's state as some 370
+        // datagrams of 900 bytes at once, more than the system's default buffer holds
+        const int buffered = 4 << 20;
+        setsockopt(handle, SOL_SOCKET, SO_RCVBUF, reinterpret_cast<const char *>(&buffered), sizeof(buffered));
+        setsockopt(handle, SOL_SOCKET, SO_SNDBUF, reinterpret_cast<const char *>(&buffered), sizeof(buffered));
 #ifdef _WIN32
         u_long nonBlocking = 1;
         ioctlsocket(handle, FIONBIO, &nonBlocking);
@@ -223,6 +260,12 @@ struct Online::Socket {
         }
         sendto(handle, reinterpret_cast<const char *>(packet.data()), static_cast<int>(packet.size()), 0,
                reinterpret_cast<const sockaddr *>(&to), sizeof(to));
+        if (havePeer && Same(to, peer)) {
+            sentToPeer += packet.size();
+        } else {
+            sentToWatchers += packet.size();
+            packetsToWatchers++;
+        }
     }
 
     static bool Same(const sockaddr_in &a, const sockaddr_in &b) {
@@ -249,6 +292,23 @@ struct Online::Socket {
             if(got<4 || memcmp(buffer,kTag,3)!=0)continue;
             const char kind=static_cast<char>(buffer[3]);
             if(kind=='H'){hellos.emplace_back(from,std::vector<uint8_t>(buffer+4,buffer+got));continue;}
+            if(kind=='W'){if(host && watchHellos.size()<64)watchHellos.emplace_back(from,std::vector<uint8_t>(buffer+4,buffer+got));continue;}
+            if(kind=='X'){if(!host && havePeer && Same(from,peer))refused.assign(reinterpret_cast<const char*>(buffer+4),static_cast<size_t>(got-4));continue;}
+            if(kind=='Q'){if(!host && havePeer && Same(from,peer) && got>=24){status.assign(buffer+4,buffer+got);statusMs=NowMs();}continue;}
+            // (a spectator's GekkoNet packets, to the host, with the room and epoch when the match has them: nothing
+            // else of theirs is taken)
+            if(host && kind=='G') {
+                if(const std::string* name=WatcherName(from)) {
+                    const uint8_t* bytes=buffer+4;size_t count=static_cast<size_t>(got-4);
+                    if(recovery) {
+                        if(count<16 || !room || Recovery::Get(bytes)!=room)continue;
+                        if(Recovery::Get(bytes+8)!=epoch){++stalePackets;continue;}
+                        bytes+=16;count-=16;
+                    }
+                    watcherHeard[*name]=NowMs();
+                    forGekko.emplace_back(bytes,bytes+count);forGekkoFrom.push_back(*name);continue;
+                }
+            }
             if(!havePeer || !Same(from,peer))continue;
             if(recovery && std::strchr("NRKSTPL",kind) && got==20) {
                 if(controls.size()<64)controls.emplace_back(kind,std::vector<uint8_t>(buffer+4,buffer+got));
@@ -262,7 +322,7 @@ struct Online::Socket {
                 payload+=16;size-=16;
             }
             lastReceived=NowMs();
-            if(kind=='G')forGekko.emplace_back(payload,payload+size);
+            if(kind=='G'){forGekko.emplace_back(payload,payload+size);forGekkoFrom.push_back(kPeer);}
             else forChat.emplace_back(kind,std::vector<uint8_t>(payload,payload+size));
         }
     }
@@ -272,8 +332,18 @@ struct Online::Socket {
 namespace {
     Online::Socket *g_socket = nullptr; // (GekkoNet's callbacks carry no pointer of ours)
 
-    void SendData(GekkoNetAddress *, const char *data, int length) {
-        if (g_socket && g_socket->havePeer) {
+    void SendData(GekkoNetAddress *addr, const char *data, int length) {
+        if (!g_socket) {
+            return;
+        }
+        // (this fork: spectators) the address GekkoNet gives is a name: the peer's, or a spectator's
+        if (addr && addr->data && g_socket->host) {
+            if (const sockaddr_in *at = g_socket->WatcherAt(static_cast<const char *>(addr->data), addr->size)) {
+                g_socket->Send('G', data, static_cast<size_t>(length), *at);
+                return;
+            }
+        }
+        if (g_socket->havePeer) {
             g_socket->Send('G', data, static_cast<size_t>(length), g_socket->peer);
         }
     }
@@ -283,9 +353,13 @@ namespace {
         while (!g_socket->forGekko.empty()) {
             std::vector<uint8_t> &packet = g_socket->forGekko.front();
             auto *result = static_cast<GekkoNetResult *>(malloc(sizeof(GekkoNetResult)));
-            result->addr.size = sizeof(kPeer) - 1;
+            const std::string from = g_socket->forGekkoFrom.empty() ? std::string(kPeer) : g_socket->forGekkoFrom.front();
+            if (!g_socket->forGekkoFrom.empty()) {
+                g_socket->forGekkoFrom.pop_front();
+            }
+            result->addr.size = static_cast<unsigned int>(from.size());
             result->addr.data = malloc(result->addr.size);
-            memcpy(result->addr.data, kPeer, result->addr.size);
+            memcpy(result->addr.data, from.data(), result->addr.size);
             result->data_len = static_cast<unsigned int>(packet.size());
             result->data = malloc(packet.size() ? packet.size() : 1);
             if (!packet.empty()) {
@@ -314,8 +388,21 @@ Online::~Online() {
 }
 
 void Online::Stop() {
+    if(m_socket && ChatHost())for(int n=0;n<3;++n)SendStatus(4); // (this fork: the spectators told, and the other player)
     if(m_options.matchFlow && m_heard && m_socket)for(int n=0;n<3;++n)SendControl('L',Epoch());
     if(m_socket && m_socket->stalePackets)fprintf(stderr,"online: ignored stale epoch packets: %llu\n",static_cast<unsigned long long>(m_socket->stalePackets));
+    for (const Spectator &one : m_spectators) {
+        if (m_session && one.handle >= 0) {
+            GekkoNetworkStats net{};
+            gekko_network_stats(m_session, one.handle, &net);
+            fprintf(stderr, "online: spectator %s: ping %u\n", one.name.c_str(), static_cast<unsigned>(net.last_ping));
+        }
+    }
+    if (m_socket && m_options.mode == OnlineOptions::Mode::Host) {
+        fprintf(stderr, "online: sent %.1f KB to the opponent, %.1f KB in %llu packets to spectators over %llu ticks\n",
+                m_socket->sentToPeer / 1024.0, m_socket->sentToWatchers / 1024.0,
+                static_cast<unsigned long long>(m_socket->packetsToWatchers), static_cast<unsigned long long>(m_ticks));
+    }
     if(m_checkpointLog){std::fclose(m_checkpointLog);m_checkpointLog=nullptr;}
     if(m_flowLog){std::fclose(m_flowLog);m_flowLog=nullptr;}
     if (m_session) {
@@ -443,6 +530,14 @@ bool Online::Start(Port &port, const OnlineOptions &options, std::string &error)
     if (!host && !m_socket->Resolve(options.host, options.port, error)) {
         return false;
     }
+    if (Spectating()) {
+        // (this fork) A spectator: its session is made once the host has answered
+        m_status = Status::Waiting;
+        m_message = "Calling " + options.host + ":" + std::to_string(options.port) + " to watch";
+        port.gekkoMatch = this;
+        fprintf(stderr, "online: %s\n", m_message.c_str());
+        return true;
+    }
     if(!CreateGameSession()){error="The rollback session could not start";return false;}
     m_status = Status::Waiting;
     m_message = host && options.arcadeWait ? "WAITING FOR A CHALLENGER" : host ? "Waiting for the other player (port " + std::to_string(options.port) + ")"
@@ -472,7 +567,9 @@ bool RecoveryHelloNonce(std::vector<uint8_t>& hello,uint64_t& nonce) {
 
 bool Online::CreateGameSession() {
     GekkoConfig config{};
-    config.num_players=2;config.max_spectators=0;config.max_input_prediction_window=kPredictionWindow;
+    // (this fork: spectators, the host's only; added once the match runs, from its confirmed state)
+    const int spectators=ChatHost() ? std::clamp(m_options.spectators,0,kMostSpectators) : 0;
+    config.num_players=2;config.max_spectators=static_cast<unsigned char>(spectators);config.max_input_prediction_window=kPredictionWindow;
     config.input_size=sizeof(uint16_t);config.state_size=m_stateSize;
     config.desync_detection=true;config.check_distance=10;
     if(!gekko_create(&m_session,GekkoGameSession))return false;
@@ -485,6 +582,149 @@ bool Online::CreateGameSession() {
     return m_local>=0 && m_remote>=0;
 }
 
+// (this fork) A spectator's session: the host as its one remote actor, the confirmed inputs it sends
+bool Online::CreateSpectateSession() {
+    GekkoConfig config{};
+    config.num_players=2;config.max_spectators=0;config.max_input_prediction_window=kPredictionWindow;
+    config.spectator_delay=static_cast<unsigned int>(std::clamp(m_options.spectatorDelay,1,300));
+    config.input_size=sizeof(uint16_t);config.state_size=m_stateSize;
+    config.desync_detection=false;
+    if(!gekko_create(&m_session,GekkoSpectateSession))return false;
+    gekko_start(m_session,&config);
+    gekko_net_adapter_set(m_session,&g_adapter);gekko_set_disconnect_timeout(m_session,kTimeoutMs);
+    GekkoNetAddress peer{const_cast<char*>(kPeer),sizeof(kPeer)-1};
+    m_remote=gekko_add_actor(m_session,GekkoRemotePlayer,&peer);
+    return m_remote>=0;
+}
+
+// (the spectators the host took, whether the match runs for them yet or not)
+int Online::Watching() const {
+    return static_cast<int>(m_spectators.size());
+}
+
+// (this fork) The host's status, to the other player and the spectators (see the packet kinds above)
+void Online::SendStatus(int phase) {
+    if(!m_socket || !ChatHost() || !m_port)return;
+    std::vector<uint8_t> q;
+    Recovery::Put(q,m_options.matchFlow?m_localNonce:0);Recovery::Put(q,m_socket->epoch);
+    q.push_back(static_cast<uint8_t>(phase));q.push_back(static_cast<uint8_t>(Watching()));
+    for(int side=0;side<2;++side)q.push_back(static_cast<uint8_t>(std::clamp(m_port->streak[side],0,255)));
+    for(const std::string& name:{ChatName(0),m_heard?ChatName(1):std::string()}){q.insert(q.end(),name.begin(),name.end());q.push_back(0);}
+    if(m_heard && m_socket->havePeer)m_socket->Send('Q',q.data(),q.size(),m_socket->peer);
+    for(const auto& [at,name]:m_socket->watchers)m_socket->Send('Q',q.data(),q.size(),at);
+}
+
+// (this fork) The host's last status, on the other player's side (how many watch) and a spectator's (what to show,
+// and a new session when the match starts again from a new epoch)
+void Online::ApplyStatus() {
+    if(!m_socket || m_socket->host || m_socket->status.size()<24)return;
+    const std::vector<uint8_t> q=std::move(m_socket->status);m_socket->status.clear();
+    const uint64_t room=Recovery::Get(q.data()),epoch=Recovery::Get(q.data()+8);
+    if(m_options.matchFlow && m_roomNonce && room!=m_roomNonce)return;
+    m_seenWatching=q[17];
+    if(!Spectating())return;
+    size_t at=20;
+    for(std::string& name:m_statusNames) {
+        size_t end=at;
+        while(end<q.size() && q[end])end++;
+        name=recomp::chat::Printable(std::string(q.begin()+static_cast<std::ptrdiff_t>(at),q.begin()+static_cast<std::ptrdiff_t>(end)),recomp::chat::kNameMost);
+        at=std::min(q.size(),end+1);
+    }
+    m_port->streak[0]=q[18];m_port->streak[1]=q[19];
+    if(m_hostPhase!=q[16])fprintf(stderr,"online: watching: the host's phase %d (epoch %llu)\n",q[16],static_cast<unsigned long long>(epoch));
+    m_hostPhase=q[16];
+    auto drop=[&]{if(m_session)gekko_destroy(&m_session);m_socket->forGekko.clear();m_socket->forGekkoFrom.clear();};
+    if(m_hostPhase==4){drop();End("The host stopped hosting",false);return;}
+    if(m_hostPhase==3) {
+        if(m_status!=Status::Recovering)fprintf(stderr,"online: watching: the players are reconnecting\n");
+        drop();m_status=Status::Recovering;m_message="Reconnecting";return;
+    }
+    if(m_options.matchFlow && epoch!=m_socket->epoch) {
+        fprintf(stderr,"online: watching epoch %llu\n",static_cast<unsigned long long>(epoch));
+        drop();m_socket->epoch=epoch;
+    }
+    if(m_heard && !m_session) {
+        if(!CreateSpectateSession()){End("The spectator session could not start",true);return;}
+        m_status=Status::Connecting;
+    }
+    if(m_status!=Status::Playing)
+        m_message=m_hostPhase!=0?"Waiting for the match"
+                  :m_statusNames[0].empty()?"WAITING FOR A CHALLENGER":m_statusNames[0]+" IS WAITING FOR A CHALLENGER";
+}
+
+// (this fork) The host adds the spectators who said hello once the match runs: from its confirmed state, which
+// GekkoNet sends them, never waiting for them
+void Online::AddSpectators() {
+    if(!m_session || m_status!=Status::Playing || !ChatHost())return;
+    for(Spectator& one:m_spectators) {
+        if(one.handle>=0)continue;
+        GekkoNetAddress at{const_cast<char*>(one.name.data()),static_cast<unsigned int>(one.name.size())};
+        one.handle=gekko_add_actor(m_session,GekkoSpectator,&at);
+        fprintf(stderr,"online: spectator %s (%s) %s at frame %llu\n",one.name.c_str(),one.nick.c_str(),one.handle>=0?"added":"not added",
+                static_cast<unsigned long long>(m_port->frame));
+    }
+}
+
+void Online::SpectatorLeft(int handle) {
+    for(size_t i=0;i<m_spectators.size();++i) {
+        if(m_spectators[i].handle!=handle)continue;
+        fprintf(stderr,"online: spectator %s left\n",m_spectators[i].name.c_str());
+        m_socket->watcherHeard.erase(m_spectators[i].name);
+        auto& list=m_socket->watchers;
+        list.erase(std::remove_if(list.begin(),list.end(),[&](const auto& w){return w.second==m_spectators[i].name;}),list.end());
+        m_spectators.erase(m_spectators.begin()+static_cast<std::ptrdiff_t>(i));
+        return;
+    }
+}
+
+// (this fork) Spectators' hellos, at the host: checked as a player's, then kept until the match runs
+void Online::WatchHellos() {
+    // (spectators not heard for 10 s while the match does not run for them: gone)
+    const uint64_t now=NowMs();
+    for(size_t i=0;i<m_spectators.size();) {
+        const Spectator& one=m_spectators[i];
+        const auto heard=m_socket->watcherHeard.find(one.name);
+        if(one.handle<0 && (heard==m_socket->watcherHeard.end() || now-heard->second>10000)) {
+            fprintf(stderr,"online: spectator %s gone\n",one.name.c_str());
+            auto& list=m_socket->watchers;
+            list.erase(std::remove_if(list.begin(),list.end(),[&](const auto& w){return w.second==one.name;}),list.end());
+            m_socket->watcherHeard.erase(one.name);
+            m_spectators.erase(m_spectators.begin()+static_cast<std::ptrdiff_t>(i));
+            continue;
+        }
+        ++i;
+    }
+    auto hellos=std::move(m_socket->watchHellos);m_socket->watchHellos.clear();
+    for(auto& [from,whole]:hellos) {
+        std::vector<uint8_t> said;std::string name;
+        recomp::chat::SplitHello(whole,said,name);
+        auto refuse=[&](const std::string& why){m_socket->Send('X',why.data(),why.size(),from);};
+        if(!m_socket->WatcherName(from)) {
+            const int most=std::clamp(m_options.spectators,0,kMostSpectators);
+            uint64_t theirNonce=0;
+            if(m_options.matchFlow && !RecoveryHelloNonce(said,theirNonce)){refuse(Mismatch(said,false));continue;}
+            if(most==0){refuse("This match does not allow spectators");continue;}
+            if(static_cast<int>(m_spectators.size())>=most){refuse("The match is full ("+std::to_string(most)+" watching)");continue;}
+            const std::string why=Mismatch(said,true);
+            if(!why.empty()){refuse(why);continue;}
+            int number=1;
+            for(bool taken=true;taken;) {
+                taken=false;
+                for(const Spectator& one:m_spectators)taken|=one.name=="spec"+std::to_string(number);
+                if(taken)number++;
+            }
+            Spectator one;one.name="spec"+std::to_string(number);one.nick=name;
+            m_spectators.push_back(one);m_socket->watchers.emplace_back(from,one.name);
+            fprintf(stderr,"online: spectator %s (%s) said hello\n",one.name.c_str(),name.c_str());
+        }
+        if(const std::string* known=m_socket->WatcherName(from))m_socket->watcherHeard[*known]=now;
+        // (each hello answered, as the players' are: the first answer may be lost)
+        const std::vector<uint8_t> hello=HelloOut();
+        m_socket->Send('H',hello.data(),hello.size(),from);
+    }
+    AddSpectators();
+}
+
 void Online::SendControl(char kind,uint64_t epoch) {
     if(!m_socket || !m_socket->havePeer || !m_roomNonce || !kind)return;
     std::vector<uint8_t> bytes;Recovery::Put(bytes,m_roomNonce);Recovery::Put(bytes,epoch);
@@ -495,7 +735,8 @@ void Online::PrepareRecovery() {
     if(m_prepared)return;
     // Outside all SDK event iterations: keep socket, peer and reliable chat channel.
     if(m_session)gekko_destroy(&m_session);
-    m_socket->forGekko.clear();m_socket->forChat.clear();
+    m_socket->forGekko.clear();m_socket->forGekkoFrom.clear();m_socket->forChat.clear();
+    for(Spectator& one:m_spectators)one.handle=-1; // (this fork: re-added when the new session runs)
     m_prepared=true;
 }
 
@@ -512,7 +753,9 @@ void Online::RequestRecovery() {
 bool Online::ResetRecoveryEpoch() {
     if(m_session)gekko_destroy(&m_session);
     if(!LoadFrom(m_arcadeState,*m_port->machine)){End("The initial recovery state could not be restored",true);return false;}
-    m_socket->forGekko.clear();m_socket->forChat.clear();m_socket->epoch=m_recovery.Epoch();
+    m_socket->forGekko.clear();m_socket->forGekkoFrom.clear();m_socket->forChat.clear();
+    m_socket->epoch=m_recovery.Epoch();
+    for(Spectator& one:m_spectators)one.handle=-1; // (this fork: re-added when the new session runs)
     m_port->frame=0;m_port->coinFrames=m_port->start2Frames=0;m_port->machine->audio.clear();
     m_port->gekkoArcadeWaiting=false;m_port->paused=false;m_port->steps=0;m_port->menu.Close();
     m_flow.Reset();PublishFlow();
@@ -541,16 +784,47 @@ void Online::End(const std::string &message, bool failed) {
     fprintf(stderr, "online: %s\n", message.c_str());
 }
 
+// Why a hello is not this match's ("" when it is): another game, ROM set, version or settings
+std::string Online::Mismatch(const std::vector<uint8_t> &said, bool recoveryCompatible) const {
+    if (said == m_hello && recoveryCompatible) {
+        return "";
+    }
+    const std::string theirs(said.begin(), said.end()), ours(m_hello.begin(), m_hello.end());
+    const auto field = [](const std::string &text, int n) {
+        size_t from = 0;
+        for (int i = 0; i < n; i++) {
+            from = text.find('|', from);
+            from = from == std::string::npos ? text.size() : from + 1;
+        }
+        return text.substr(from, text.find('|', from) - from);
+    };
+    std::string why = "The other player has another game (" + field(theirs, 0) + ")";
+    if (field(theirs, 0) == field(ours, 0)) {
+        why = field(theirs, 1) != field(ours, 1) ? "The other player's ROM set is not the same as yours"
+              : field(theirs, 2) != field(ours, 2)
+                  ? "The other player has another version (" + field(theirs, 2) + ", yours " + field(ours, 2) + ")"
+                  : "Your settings for the game differ: " + Differing(field(theirs, 3), field(ours, 3));
+    }
+    if(!recoveryCompatible && field(theirs,0)==field(ours,0) && field(theirs,1)==field(ours,1) &&
+       field(theirs,2)==field(ours,2) && field(theirs,3)==field(ours,3))
+        why="The other player uses an incompatible ForkAde recovery protocol";
+    return why;
+}
+
+// (this fork: with this player's name after a 0 byte, and the match flow's nonce before it)
+std::vector<uint8_t> Online::HelloOut() const {
+    auto base=m_hello;
+    if(m_options.matchFlow) {
+        char nonce[18];std::snprintf(nonce,sizeof nonce,":%016llx",static_cast<unsigned long long>(m_localNonce));
+        base.insert(base.end(),nonce,nonce+17);
+    }
+    return recomp::chat::HelloWithName(base, m_options.name);
+}
+
 void Online::SendHello() {
     if (m_socket->havePeer) {
-        // (this fork: with this player's name after a 0 byte)
-        auto base=m_hello;
-        if(m_options.matchFlow) {
-            char nonce[18];std::snprintf(nonce,sizeof nonce,":%016llx",static_cast<unsigned long long>(m_localNonce));
-            base.insert(base.end(),nonce,nonce+17);
-        }
-        const std::vector<uint8_t> hello = recomp::chat::HelloWithName(base, m_options.name);
-        m_socket->Send('H', hello.data(), hello.size(), m_socket->peer);
+        const std::vector<uint8_t> hello = HelloOut();
+        m_socket->Send(Spectating() ? 'W' : 'H', hello.data(), hello.size(), m_socket->peer);
     }
 }
 
@@ -567,7 +841,12 @@ void Online::Pump() {
             m_socket->havePeer = true;
         }
         if (!Socket::Same(from, m_socket->peer)) {
-            continue; // (someone else: not the player this session is with)
+            // (someone else: not the player this session is with; (this fork) told so, as a spectator would be)
+            if (m_socket->host) {
+                const std::string why = "The match is full: two players are already playing";
+                m_socket->Send('X', why.data(), why.size(), from);
+            }
+            continue;
         }
         if (m_socket->host) {
             SendHello(); // (each hello answered: the first answer may be lost)
@@ -577,26 +856,7 @@ void Online::Pump() {
         }
         uint64_t peerNonce=0;
         const bool recoveryCompatible=!m_options.matchFlow || RecoveryHelloNonce(said,peerNonce);
-        if (said != m_hello || !recoveryCompatible) {
-            const std::string theirs(said.begin(), said.end()), ours(m_hello.begin(), m_hello.end());
-            const auto field = [](const std::string &text, int n) {
-                size_t from = 0;
-                for (int i = 0; i < n; i++) {
-                    from = text.find('|', from);
-                    from = from == std::string::npos ? text.size() : from + 1;
-                }
-                return text.substr(from, text.find('|', from) - from);
-            };
-            std::string why = "The other player has another game (" + field(theirs, 0) + ")";
-            if (field(theirs, 0) == field(ours, 0)) {
-                why = field(theirs, 1) != field(ours, 1) ? "The other player's ROM set is not the same as yours"
-                      : field(theirs, 2) != field(ours, 2)
-                          ? "The other player has another version (" + field(theirs, 2) + ", yours " + field(ours, 2) + ")"
-                          : "Your settings for the game differ: " + Differing(field(theirs, 3), field(ours, 3));
-            }
-            if(!recoveryCompatible && field(theirs,0)==field(ours,0) && field(theirs,1)==field(ours,1) &&
-               field(theirs,2)==field(ours,2) && field(theirs,3)==field(ours,3))
-                why="The other player uses an incompatible ForkAde recovery protocol";
+        if (const std::string why = Mismatch(said, recoveryCompatible); !why.empty()) {
             End(why, true);
             return;
         }
@@ -616,8 +876,27 @@ void Online::Pump() {
         m_theirName = name;
         m_status = Status::Connecting;
         m_message = "Connecting";
+        if (Spectating()) {
+            // (this fork) The host took this spectator: its session, which waits for the match's state
+            if (!CreateSpectateSession()) {
+                End("The spectator session could not start", true);
+                return;
+            }
+            m_message = "Waiting for the match";
+        }
     }
     m_socket->hellos.clear();
+    if (m_socket->host) {
+        WatchHellos();
+    } else if (!m_socket->refused.empty()) {
+        End(recomp::chat::Printable(m_socket->refused, 120), true);
+        return;
+    } else {
+        ApplyStatus();
+        if (m_status == Status::Ended) {
+            return;
+        }
+    }
     auto controls=std::move(m_socket->controls);m_socket->controls.clear();
     for(const auto& [kind,payload]:controls) {
         if(!m_options.matchFlow || !m_heard || payload.size()!=16 || Recovery::Get(payload.data())!=m_roomNonce)continue;
@@ -648,7 +927,7 @@ void Online::PublishFlow() {
 }
 
 void Online::UpdateFlowMessage() {
-    if(!m_options.matchFlow || m_status==Status::Ended)return;
+    if(!m_options.matchFlow || m_status==Status::Ended || Spectating())return;
     if(Recovering())m_message=ChatHost()?"Waiting for the same player (up to 60 seconds)":"Rejoining the same match (up to 60 seconds)";
     else if(m_heard && NowMs()<m_challengerUntil)m_message=Epoch()>1?"Connection restored - starting again":"Here comes a new challenger";
     else if(m_status==Status::Connecting && m_message=="Here comes a new challenger")m_message="Connecting";
@@ -698,7 +977,39 @@ int Online::Tick(const uint16_t local[2], bool advanceWaiting) {
     if (m_status == Status::Ended) {
         return 0;
     }
+    if (ChatHost() && m_ticks % 15 == 0) {
+        // (this fork: spectators) the host's status, to the other player and the spectators
+        SendStatus(m_status == Status::Ended ? 4 : Recovering() ? 3 : !m_heard ? 0 : m_status == Status::Playing ? 2 : 1);
+    }
     UpdateFlowMessage();
+    if (Spectating()) {
+        // (this fork) A spectator: no input of its own; the confirmed frames as they come, faster when behind
+        if (!m_heard) {
+            if (m_ticks % 15 == 1) {
+                SendHello();
+            }
+            return 0;
+        }
+        if (m_ticks % 60 == 0) {
+            SendHello(); // (the host keeps a spectator it hears, while the match does not run for it too)
+        }
+        if (m_socket->statusMs && NowMs() - m_socket->statusMs > kTimeoutMs) {
+            fprintf(stderr, "online: watching: no status from the host for %llu ms (tick %llu)\n",
+                    static_cast<unsigned long long>(NowMs() - m_socket->statusMs), static_cast<unsigned long long>(m_ticks));
+            End("The connection to the match was lost", false);
+            return 0;
+        }
+        if (!m_session) {
+            return 0;
+        }
+        gekko_network_poll(m_session);
+        Run();
+        for (int more = 0; more < 2 && m_status == Status::Playing &&
+                           gekko_spectator_buffered_frames(m_session) > std::clamp(m_options.spectatorDelay, 1, 300) + 8; ++more) {
+            Run();
+        }
+        return m_shown;
+    }
     if (!m_heard) {
         if(ArcadeWaiting() && advanceWaiting) {
             m_port->pad[0]=mine;
@@ -728,6 +1039,9 @@ int Online::Tick(const uint16_t local[2], bool advanceWaiting) {
 }
 
 void Online::Run() {
+    if (!m_session) {
+        return;
+    }
     Events();
     if (m_status == Status::Ended || m_status==Status::Recovering) {
         return;
@@ -739,7 +1053,7 @@ void Online::Run() {
         GekkoGameEvent *event = events[i];
         switch (event->type) {
         case GekkoSaveEvent: {
-            if(m_options.matchFlow) {
+            if(m_options.matchFlow && !Spectating()) {
                 m_flow.Save(event->data.save.frame);
                 if(m_flowLog) {
                     const auto& s=m_flow.state;
@@ -761,13 +1075,19 @@ void Online::Run() {
             break;
         }
         case GekkoLoadEvent: {
-            if(m_options.matchFlow) {
+            if(m_options.matchFlow && !Spectating()) {
                 if(!m_flow.Load(event->data.load.frame)) { End("The match presentation checkpoint is unavailable",true); break; }
                 PublishFlow();
             }
             std::vector<uint8_t> data(event->data.load.state, event->data.load.state + event->data.load.state_len);
             if (!LoadFrom(data, machine)) {
                 End("A state the session kept did not load", true);
+            }
+            if (Spectating()) {
+                // (this fork) The match's state as the host confirmed it: GekkoNet's frame N is the board after N + 1
+                // frames, which is what the players' frame count says then
+                m_port->frame = static_cast<uint64_t>(std::max(0, event->data.load.frame + 1));
+                fprintf(stderr, "online: watching from frame %d (%u bytes)\n", event->data.load.frame, event->data.load.state_len);
             }
             break;
         }
@@ -778,7 +1098,7 @@ void Online::Run() {
             const bool again = event->data.adv.rolling_back || event->data.adv.running_ahead;
             const size_t heard = machine.audio.size();
             m_port->RunOnlineFrame(players, again);
-            if(m_options.matchFlow && !event->data.adv.running_ahead) {
+            if(m_options.matchFlow && !Spectating() && !event->data.adv.running_ahead) {
                 const bool before=m_port->cameIn;
                 const auto result = TheGame().onlineMatchResult;
                 m_flow.Advance(players,cps2recomp::kStart,result ? result() : cps2recomp::battle::RoundResultNow(),result ? 1 : cps2recomp::battle::RoundsToWin());
@@ -813,14 +1133,33 @@ void Online::Events() {
                 fprintf(stderr, "online: playing\n");
             }
             m_status = Status::Playing;
-            if(m_options.matchFlow) {
+            if(m_options.matchFlow && !Spectating()) {
                 const bool resumed=Recovering();m_recovery.Complete();m_prepared=false;m_everPlayed=true;
                 if(resumed){m_challengerUntil=NowMs()+1200;fprintf(stderr,"online: recovery playing epoch %llu\n",static_cast<unsigned long long>(Epoch()));}
             }
             m_message.clear();
+            AddSpectators();
             break;
         case GekkoPlayerDisconnected:
+            // (this fork) A spectator leaving is not the other player leaving
+            if (ChatHost() && event->data.disconnected.handle != m_remote) {
+                SpectatorLeft(event->data.disconnected.handle);
+                break;
+            }
+            if (Spectating()) {
+                // (the players reconnecting: the host's status says so, and a new session comes with the new epoch)
+                if (m_hostPhase != 3) {
+                    End("The match ended or the connection was lost", false);
+                }
+                break;
+            }
             RequestRecovery();
+            break;
+        case GekkoSpectatorPaused:
+            fprintf(stderr, "online: watching paused, waiting for the match\n");
+            break;
+        case GekkoSpectatorUnpaused:
+            fprintf(stderr, "online: watching again\n");
             break;
         case GekkoDesyncDetected: {
             const auto &d = event->data.desynced;
@@ -845,8 +1184,17 @@ std::string Online::Stats() const {
     } else {
         GekkoNetworkStats net{};
         gekko_network_stats(m_session, m_remote, &net);
-        snprintf(text, sizeof(text), "PING %u  DELAY %d  ROLLBACK %u", static_cast<unsigned>(net.last_ping), m_options.delay,
-                 rollbacks.last_frames);
+        // (this fork: spectators) WATCHING on a spectator's screen; how many watch on the players'
+        const int watching = ChatHost() ? Watching() : m_seenWatching;
+        if (Spectating()) {
+            snprintf(text, sizeof(text), "WATCHING   PING %u", static_cast<unsigned>(net.last_ping));
+        } else if (watching > 0) {
+            snprintf(text, sizeof(text), "PING %u  DELAY %d  ROLLBACK %u   %d WATCHING", static_cast<unsigned>(net.last_ping),
+                     m_options.delay, rollbacks.last_frames, watching);
+        } else {
+            snprintf(text, sizeof(text), "PING %u  DELAY %d  ROLLBACK %u", static_cast<unsigned>(net.last_ping), m_options.delay,
+                     rollbacks.last_frames);
+        }
     }
     return text;
 }
@@ -878,7 +1226,8 @@ bool Online::ChatHost() const {
 }
 
 bool Online::ChatReady() const {
-    return m_chat && m_heard && m_status == Status::Playing;
+    // (this fork: spectators chat in a later stage of match-spectators)
+    return m_chat && m_heard && m_status == Status::Playing && !Spectating();
 }
 
 bool Online::ChatOver() const {
@@ -906,6 +1255,9 @@ MatchView Online::ReadMatch() const {
     view.hosting = ChatHost(); view.found = m_heard; view.arcade = m_options.arcadeWait;
     view.local = ChatLocal(); view.delay = m_options.delay; view.failed = m_failed;
     view.names = {ChatName(0), ChatName(1)};
+    if (Spectating()) {
+        view.names = {m_statusNames[0], m_statusNames[1]}; // (this fork: the players', from the host's status)
+    }
     view.message = Message(); view.stats = Stats();
     if (m_session && m_status == Status::Playing && m_options.mode != OnlineOptions::Mode::Stress) {
         GekkoNetworkStats stats{};

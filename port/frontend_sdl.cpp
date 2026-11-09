@@ -741,7 +741,8 @@ int RunWindowed(Port &port) {
             return 1;
         }
         const OnlineOptions::Mode mode = port.opt.gekko.mode;
-        const char *who = mode == OnlineOptions::Mode::Host ? "player 1" : mode == OnlineOptions::Mode::Join ? "player 2" : "stress test";
+        const char *who = mode == OnlineOptions::Mode::Host ? "player 1" : mode == OnlineOptions::Mode::Join ? "player 2"
+                        : mode == OnlineOptions::Mode::Watch ? "watching" : "stress test";
         SDL_SetWindowTitle(window, (std::string(title) + " - online, " + who).c_str());
     }
     uint64_t displayedEpoch=onlineOwner->Epoch();

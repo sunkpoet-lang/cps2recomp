@@ -1454,7 +1454,7 @@ void Port::Shown(std::vector<uint32_t> &pixels, std::vector<SDL_Rect> *panels) c
         status(shotSaid.c_str(), said * 14);
     }
     // (online: each player's name under their side's life bar, and under it a win streak of two or more)
-    const bool forkadeNames = gekkoOnline && opt.gekko.matchFlow && Match() &&
+    const bool forkadeNames = gekkoOnline && (opt.gekko.matchFlow || opt.gekko.mode == OnlineOptions::Mode::Watch) && Match() &&
         Match()->ReadMatch().phase == MatchView::Phase::Playing;
     if ((net && !connecting) || forkadeNames) {
         const MatchView match = Match()->ReadMatch();
@@ -2811,6 +2811,8 @@ void Usage() {
             "  --gekko-host [PORT]    (this fork) GekkoNet online, player 1, waiting on that UDP port (7845); --gekko-join\n"
             "                         HOST:PORT, player 2;\n"
             "  --gekko-delay N        ... the local controls N frames late (1); --gekko-stress: rollback every frame (online.h)\n"
+            "  --gekko-watch HOST:PORT  (this fork) watch that host's match; --gekko-spectators N: how many may watch the\n"
+            "                         host's (6; 0 none); --gekko-spectator-delay N: frames a spectator stays behind (15)\n"
             "  --cpu MODE             native (translated code), blocks (the interpreter run the same way),\n"
             "                         interp (the interpreter, an instruction at a time), check\n"
             "  --sound SIDE           driver (the sound program as ordinary code), z80 (the program itself),\n"
@@ -3079,6 +3081,19 @@ bool ParseArgs(int argc, char **argv, port::Options &o) {
             if (colon != std::string::npos) {
                 o.gekko.port = static_cast<uint16_t>(atoi(v.c_str() + colon + 1));
             }
+        } else if (a == "--gekko-watch") {
+            // (this fork) a spectator of the GekkoNet match at HOST:PORT (openspec change match-spectators)
+            const std::string v = next();
+            const size_t colon = v.rfind(':');
+            o.gekko.mode = port::OnlineOptions::Mode::Watch;
+            o.gekko.host = v.substr(0, colon);
+            if (colon != std::string::npos) {
+                o.gekko.port = static_cast<uint16_t>(atoi(v.c_str() + colon + 1));
+            }
+        } else if (a == "--gekko-spectators") {
+            o.gekko.spectators = atoi(next());
+        } else if (a == "--gekko-spectator-delay") {
+            o.gekko.spectatorDelay = atoi(next());
         } else if (a == "--gekko-flow-log") {
             o.gekko.flowLog = next();
         } else if (a == "--gekko-checkpoint-log") {
@@ -3298,10 +3313,14 @@ int main(int argc, char **argv) {
             return 1;
         }
         const bool stress = p.opt.gekko.mode == port::OnlineOptions::Mode::Stress;
+        const bool watching = online.Spectating();
         uint64_t shown = 0,shownEpoch=online.Epoch();
         const uint64_t frames = p.opt.frames ? p.opt.frames : 600;
-        while (shown < frames && online.GetStatus() != port::Online::Status::Ended) {
-            p.frame = shown; // (the movie and the made-up play go by the frames seen)
+        // (this fork: a spectator goes by the match's own frames, from the one it started watching at)
+        while ((watching ? p.frame : shown) < frames && online.GetStatus() != port::Online::Status::Ended) {
+            if (!watching) {
+                p.frame = shown; // (the movie and the made-up play go by the frames seen)
+            }
             p.GatherInput();
             const uint16_t local[2] = {p.pad[0], stress ? p.pad[1] : uint16_t{0}};
             const bool wasArcade=online.ArcadeWaiting();
@@ -3314,8 +3333,10 @@ int main(int argc, char **argv) {
                 std::this_thread::sleep_for(std::chrono::microseconds(online.FramesAhead() > 1.0f ? 17000 : 16700));
             }
         }
-        p.frame = shown;
-        fprintf(stderr, "online: %llu frames; state hash %08x\n", static_cast<unsigned long long>(shown), p.StateHash());
+        if (!watching) {
+            p.frame = shown;
+        }
+        fprintf(stderr, "online: %llu frames; state hash %08x\n", static_cast<unsigned long long>(watching ? p.frame : shown), p.StateHash());
         if (!online.Message().empty()) {
             fprintf(stderr, "online: %s\n", online.Message().c_str());
         }
