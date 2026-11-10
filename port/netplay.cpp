@@ -725,6 +725,10 @@ bool Netplay::Introduce(uint64_t now, std::string &error) {
             }
             return true;
         }
+        // (this fork, online-abuse-protection: a service that said it is busy is asked again only when it said)
+        if (now < busyUntil) {
+            return true;
+        }
         // (with where the internet sees us, or without: then only the addresses of this machine's networks)
         if (settings.hosting) {
             const std::string again = settings.renewCode.empty() ? ""
@@ -758,6 +762,21 @@ bool Netplay::Introduce(uint64_t now, std::string &error) {
             return true;
         }
         const HttpAnswer answer = asking.get();
+        if (answer.status == 429) {
+            // (busy: its "retry" seconds, 10 if it says none, at most 10 minutes)
+            const size_t at = answer.body.find("\"retry\":");
+            const int said = at == std::string::npos ? 0 : std::atoi(answer.body.c_str() + at + 8);
+            const int wait = std::clamp(said > 0 ? said : 10, 1, 600);
+            fprintf(stderr, "online: the online service is busy: asking again in %d seconds\n", wait);
+            if (!settings.hosting) {
+                error = "The online service is busy: try again in " + std::to_string(wait) + " seconds.";
+                return false;
+            }
+            waiting = "The online service is busy: trying again in " + std::to_string(wait) + " seconds";
+            busyUntil = now + static_cast<uint64_t>(wait) * 1000;
+            intro = Intro::Stun;
+            return true;
+        }
         if (settings.hosting) {
             if (answer.status == 200 && !JsonText(answer.body, "code").empty()) {
                 code = Spaced(JsonText(answer.body, "code"));
@@ -822,6 +841,11 @@ bool Netplay::Introduce(uint64_t now, std::string &error) {
             if (answer.status == 200 && invitation.empty()) {
                 invitation = JsonText(answer.body, "invite");
             }
+            if (answer.status == 429) {
+                const size_t at = answer.body.find("\"retry\":");
+                const int said = at == std::string::npos ? 0 : std::atoi(answer.body.c_str() + at + 8);
+                busyUntil = now + static_cast<uint64_t>(std::clamp(said > 0 ? said : 10, 1, 600)) * 1000;
+            }
             if (answer.status == 404) {
                 // (the code has run out (30 minutes): the same one had again, for whoever was given it, and asked on)
                 fprintf(stderr, "online: the code ran out: asking for it again\n");
@@ -832,7 +856,7 @@ bool Netplay::Introduce(uint64_t now, std::string &error) {
             }
         }
         const uint64_t waited = now - codeAt;
-        if (now - askedAt > (waited < 120000 ? 2000u : waited < 600000 ? 5000u : 10000u)) {
+        if (now >= busyUntil && now - askedAt > (waited < 120000 ? 2000u : waited < 600000 ? 5000u : 10000u)) {
             ask("GET", "/v1/host/" + code.substr(0, 3) + code.substr(4) + "?secret=" + secret, "");
         }
         return true;
