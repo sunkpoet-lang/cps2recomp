@@ -186,7 +186,7 @@ namespace {
         {"Screenshot", "F8"},
         {"Slot before, next", "F6, F7"}, {"Fullscreen", "F11"},   {"Soundtrack", "F12"},       {"Test switch", "F2"},
         {"Pause", "P"},               {"One frame", "O"},          {"Slower, faster", "[, ]"}, {"Restart", "Backspace"},
-        {"Quieter, louder", "-, ="},
+        {"Quieter, louder", "-, ="}, {"Names and ping (online)", "Tab"},
     };
 
     recomp::BarEntry BarItem(const char *label, int id, const char *shortcut = "", bool enabled = true) {
