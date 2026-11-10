@@ -95,6 +95,153 @@ async function playerId(secret) {
   return Array.from(hash.slice(0, 6), (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+// (this fork, ForkAde's online-abuse-protection) Every request's body is read through this, at most kMaxBody bytes:
+// one that says it is larger, or turns out larger while read, is refused (413) before it is all read
+const kMaxBody = 16 * 1024;
+class TooLarge extends Error {}
+
+async function readBody(request) {
+  const said = Number(request.headers.get("content-length"));
+  if (said > kMaxBody) {
+    throw new TooLarge();
+  }
+  if (!request.body) {
+    return "";
+  }
+  const reader = request.body.getReader();
+  const chunks = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) {
+      break;
+    }
+    size += value.byteLength;
+    if (size > kMaxBody) {
+      await reader.cancel();
+      throw new TooLarge();
+    }
+    chunks.push(value);
+  }
+  const all = new Uint8Array(size);
+  let at = 0;
+  for (const chunk of chunks) {
+    all.set(chunk, at);
+    at += chunk.byteLength;
+  }
+  return new TextDecoder().decode(all);
+}
+
+// (JSON that is an object, or null: what every route that takes JSON accepts)
+function parseObject(text) {
+  try {
+    const value = JSON.parse(text);
+    return value && typeof value === "object" && !Array.isArray(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+// The public routes, each with its method and whether it takes a JSON body: the guard refuses the rest before any
+// handler runs (the threat list, ForkAde's online-abuse-protection/threats.md, names each)
+function routeOf(method, parts) {
+  if (parts[0] !== "v1") {
+    return method === "GET" ? { name: "home" } : null;
+  }
+  const kinds = {
+    stats: { method: "GET", length: [2] },
+    host: { method: "POST", length: [2], json: true, poll: { method: "GET", length: [3] } },
+    room: { method: "POST", length: [2, 3], json: true },
+    lobby: { method: "GET", length: [2, 3] },
+    code: { method: "GET", length: [3] },
+    join: { method: "POST", length: [3], json: true },
+  };
+  const kind = kinds[parts[1]];
+  if (!kind) {
+    return null;
+  }
+  // (GET /v1/host/CODE is the host's question, another route than POST /v1/host)
+  const route = kind.poll && method === kind.poll.method ? { ...kind.poll, name: "poll" } : { ...kind, name: parts[1] };
+  return route.method === method && route.length.includes(parts.length) ? route : null;
+}
+
+// (this fork, online-abuse-protection) How often each action may be done, in a sliding minute: by a player (their
+// secret-derived id, where the route has one) and by a network (the request's address, IPv4 to its /24 and IPv6 to
+// its /48, so a home's devices count as one and no full address is kept). Loose for honest play: a launcher checks in
+// every 10 to 20 seconds, a waiting host asks every 2 to 10.
+// (and caps: open matches at once by a network, invitations waiting for one player)
+export const kOpenHosts = 3;
+export const kPendingInvitations = 20;
+
+export const kLimits = {
+  host: { player: 10, network: 20 },
+  poll: { match: 90 },
+  join: { network: 30 },
+  code: { network: 60 },
+  lobby: { network: 30 },
+  room: { player: 20, network: 120 },
+  leave: { player: 20 },
+  decline: { player: 30 },
+};
+
+// The network a request came from, as the limits key it: an address cut to its /24 (IPv4) or /48 (IPv6)
+export function networkOf(request) {
+  const address = request.headers.get("cf-connecting-ip") || "";
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(address)) {
+    return address.split(".").slice(0, 3).join(".") + ".0/24";
+  }
+  if (address.includes(":")) {
+    const groups = address.split("::")[0].split(":");
+    return groups.slice(0, 3).join(":") + "::/48";
+  }
+  return "unknown";
+}
+
+// Counts in a sliding minute, kept in memory by the object that does the action (a limit costs no extra request):
+// `hit(key, limit)` is 0 if the action may go on, or the seconds to wait
+export class Limiter {
+  constructor(window = 60 * 1000) {
+    this.window = window;
+    this.hits = new Map(); // key -> times, oldest first
+  }
+  hit(key, limit, now = Date.now()) {
+    let times = this.hits.get(key);
+    if (!times) {
+      times = [];
+      this.hits.set(key, times);
+    }
+    while (times.length && now - times[0] >= this.window) {
+      times.shift();
+    }
+    if (times.length >= limit) {
+      return Math.max(1, Math.ceil((times[0] + this.window - now) / 1000));
+    }
+    times.push(now);
+    if (this.hits.size > 10000) {
+      // (a flood of new keys: the quiet ones let go)
+      for (const [k, t] of this.hits) {
+        if (!t.length || now - t[t.length - 1] >= this.window) {
+          this.hits.delete(k);
+        }
+      }
+    }
+    return 0;
+  }
+}
+
+// A refusal over a limit: 429 with the seconds to wait, once limits are enforced (env.LIMITS = "enforce"); until
+// then the action goes on and the would-be refusal is only logged (online-abuse-protection's rollout: log first)
+function overLimit(env, action, kind, wait) {
+  console.log(JSON.stringify({ limit: action, by: kind, wait, enforced: env.LIMITS === "enforce" }));
+  if (env.LIMITS !== "enforce") {
+    return null;
+  }
+  return new Response(JSON.stringify({ error: "busy", retry: wait }), {
+    status: 429,
+    headers: { "content-type": "application/json", "retry-after": String(wait) },
+  });
+}
+
 function cleanIds(list) {
   return Array.isArray(list) ? list.filter((id) => typeof id === "string" && /^[0-9a-f]{12}$/.test(id)).slice(0, 200) : [];
 }
@@ -103,6 +250,39 @@ export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const parts = url.pathname.split("/").filter(Boolean);
+    // (this fork) The guard: the route known and its method right, the body read within kMaxBody, and JSON where the
+    // route takes it; each handler then has the body's text, already checked
+    const route = routeOf(request.method, parts);
+    if (!route) {
+      return json({ error: "not here" }, request.method === "GET" || request.method === "POST" ? 404 : 405);
+    }
+    let text = "";
+    try {
+      text = await readBody(request);
+    } catch (error) {
+      if (error instanceof TooLarge) {
+        return json({ error: "too large" }, 413);
+      }
+      throw error;
+    }
+    if (route.json && parseObject(text) === null) {
+      return json({ error: "not JSON" }, 400);
+    }
+    // (the network's limit for the actions not counted by an object of their own: hosting, joining, looking up a code)
+    const network = networkOf(request);
+    if (route.name === "host" || route.name === "join" || route.name === "code") {
+      const limits = env.LIMITS_COUNTER.get(env.LIMITS_COUNTER.idFromName("all"));
+      const asked = route.name === "host" ? parseObject(text) : null;
+      const player = asked && typeof asked.secret === "string" ? asked.secret.slice(0, 64) : "";
+      const again = Boolean(asked && typeof asked.code === "string" && cleanCode(asked.code) && player);
+      const said = await (await limits.fetch("https://limits/hit", { method: "POST", body: JSON.stringify({ action: route.name, network, player, again }) })).json();
+      if (said.wait) {
+        const refused = overLimit(env, route.name, said.by, said.wait);
+        if (refused) {
+          return refused;
+        }
+      }
+    }
     // (a count for the stats, after the answer: it never holds the answer up)
     const count = (what, body) => {
       const stats = env.STATS.get(env.STATS.idFromName("all"));
@@ -116,13 +296,7 @@ export default {
       return Response.redirect("https://github.com/tmcleroy/cps2recomp", 302);
     }
     if (request.method === "POST" && parts[1] === "host" && parts.length === 2) {
-      const text = await request.text();
-      let asked = null;
-      try {
-        asked = JSON.parse(text);
-      } catch {
-        return json({ error: "not JSON" }, 400);
-      }
+      const asked = parseObject(text);
       // (the host's code again: open to be joined once more, if it is theirs, or free)
       const again = typeof asked.code === "string" ? cleanCode(asked.code) : null;
       if (again && typeof asked.secret === "string") {
@@ -141,6 +315,8 @@ export default {
           const body = await answer.json();
           if (answer.ok) {
             count("hosted", { game: cleanText(asked.game) });
+            const limits = env.LIMITS_COUNTER.get(env.LIMITS_COUNTER.idFromName("all"));
+            await limits.fetch("https://limits/opened", { method: "POST", body: JSON.stringify({ network, code }) });
           }
           return json(answer.ok ? { code, secret: body.secret } : body, answer.status);
         }
@@ -149,7 +325,6 @@ export default {
     }
     if (request.method === "POST" && parts[1] === "room" && parts.length <= 3 && parts[2] !== "count") {
       const room = env.ROOMS.get(env.ROOMS.idFromName("all"));
-      const text = await request.text();
       let lobby = null;
       if (!parts[2]) {
         // (a check-in that asks for the lobby too: the two asked at once, and said in one answer)
@@ -162,7 +337,7 @@ export default {
           // (the room says what was wrong with it)
         }
       }
-      const answer = await room.fetch(`https://room/${parts[2] || "here"}`, { method: "POST", body: text });
+      const answer = await room.fetch(`https://room/${parts[2] || "here"}?from=${encodeURIComponent(network)}`, { method: "POST", body: text });
       if (!lobby || !answer.ok) {
         return answer;
       }
@@ -172,7 +347,7 @@ export default {
     if (request.method === "GET" && parts[1] === "lobby" && (parts.length === 2 || parts.length === 3)) {
       const lobby = env.LOBBIES.get(env.LOBBIES.idFromName("all"));
       const game = parts.length === 3 ? `&game=${encodeURIComponent(cleanText(parts[2]))}` : "";
-      return lobby.fetch(`https://lobby/list?protocol=${encodeURIComponent(url.searchParams.get("protocol") || "")}${game}`);
+      return lobby.fetch(`https://lobby/list?protocol=${encodeURIComponent(url.searchParams.get("protocol") || "")}${game}&from=${encodeURIComponent(network)}`);
     }
     const code = parts.length === 3 ? cleanCode(parts[2]) : null;
     if (!code) {
@@ -186,7 +361,6 @@ export default {
       return match.fetch(`https://match/poll?secret=${encodeURIComponent(url.searchParams.get("secret") || "")}`);
     }
     if (request.method === "POST" && parts[1] === "join") {
-      const text = await request.text();
       const answer = await match.fetch("https://match/join", { method: "POST", body: text });
       if (answer.ok) {
         let game = "";
@@ -194,6 +368,8 @@ export default {
           game = cleanText(JSON.parse(text).game);
         } catch {}
         count("joined", { game, code });
+        const limits = env.LIMITS_COUNTER.get(env.LIMITS_COUNTER.idFromName("all"));
+        await limits.fetch("https://limits/closed", { method: "POST", body: JSON.stringify({ code }) });
       }
       return answer;
     }
@@ -279,6 +455,14 @@ export class Match {
       if (url.searchParams.get("secret") !== match.secret) {
         return json({ error: "no such code" }, 404);
       }
+      this.limiter = this.limiter || new Limiter();
+      const wait = this.limiter.hit("poll", kLimits.poll.match, now);
+      if (wait) {
+        const refused = overLimit(this.env, "poll", "match", wait);
+        if (refused) {
+          return refused;
+        }
+      }
       if (!match.joiner && now - (this.waitingSaid || 0) > 15000) {
         // (the stats told this host is waiting, now and then: it is counted as waiting while it has been told lately)
         this.waitingSaid = now;
@@ -358,8 +542,9 @@ export class Match {
 // The open matches, every game's: the listed hosts still asking (kSeen), each by its code. Kept in memory only, as the
 // waiting room is: a lobby that is let go is made again by the hosts' next questions (each says all the lobby shows).
 export class Lobby {
-  constructor(state) {
+  constructor(state, env) {
     this.state = state;
+    this.env = env;
     this.matches = {};
   }
 
@@ -368,6 +553,17 @@ export class Lobby {
     const now = Date.now();
     const matches = this.matches;
     if (url.pathname === "/list") {
+      const from = url.searchParams.get("from");
+      if (from) {
+        this.limiter = this.limiter || new Limiter();
+        const wait = this.limiter.hit(from, kLimits.lobby.network, now);
+        if (wait) {
+          const refused = overLimit(this.env || {}, "lobby", "network", wait);
+          if (refused) {
+            return refused;
+          }
+        }
+      }
       const protocol = Number(url.searchParams.get("protocol")) || 0;
       const game = url.searchParams.get("game");
       const shown = [];
@@ -381,7 +577,10 @@ export class Lobby {
       shown.sort((a, b) => a.waiting - b.waiting);
       return json({ matches: shown.slice(0, 200) });
     }
-    const body = JSON.parse(await request.text());
+    const body = parseObject(await request.text());
+    if (!body) {
+      return json({ error: "not JSON" }, 400);
+    }
     if (!body.code) {
       return json({});
     }
@@ -473,12 +672,34 @@ export class Room {
       if (!this.invitations.has(to)) {
         this.invitations.set(to, new Map());
       }
+      // (this fork) At most kPendingInvitations waiting for one player: a new one past that is not given
+      if (!this.invitations.get(to).has(code) && this.invitations.get(to).size >= kPendingInvitations) {
+        return json({ given: false });
+      }
       this.invitations.get(to).set(code, { from, name: cleanName(body.name), game: cleanText(body.game), title: cleanText(body.title), version: cleanText(body.version), seen: now });
       return json({ given: true });
     }
     const id = await playerId(body.secret);
     if (!id) {
       return json({ error: "no secret" }, 400);
+    }
+    // (this fork) The player's limit for this action, and the network's for check-ins
+    const action = url.pathname === "/here" ? "room" : url.pathname.slice(1);
+    if (kLimits[action]) {
+      this.limiter = this.limiter || new Limiter();
+      let wait = this.limiter.hit(`${action}:${id}`, kLimits[action].player, now);
+      let by = "player";
+      const from = url.searchParams.get("from");
+      if (!wait && from && kLimits[action].network) {
+        wait = this.limiter.hit(`${action}@${from}`, kLimits[action].network, now);
+        by = "network";
+      }
+      if (wait) {
+        const refused = overLimit(this.env, action, by, wait);
+        if (refused) {
+          return refused;
+        }
+      }
     }
     if (url.pathname === "/leave") {
       this.players.delete(id);
@@ -526,6 +747,72 @@ export class Room {
   }
 }
 
+// (this fork, online-abuse-protection) The counts for the actions no object of their own does: hosting (each code is
+// a match of its own), joining and looking up a code. One object, in memory only: let go, it starts counting again.
+export class Limits {
+  constructor(state, env) {
+    this.state = state;
+    this.env = env;
+    this.limiter = new Limiter();
+    this.open = new Map(); // code -> {network, until}: matches hosted and not yet joined (kOpenHosts)
+  }
+
+  // (the open matches of a network, the ones past their lifetime let go)
+  openOf(network, now) {
+    const mine = [];
+    for (const [code, o] of this.open) {
+      if (o.until <= now) {
+        this.open.delete(code);
+      } else if (o.network === network) {
+        mine.push(o);
+      }
+    }
+    return mine;
+  }
+
+  async fetch(request) {
+    const url = new URL(request.url);
+    const body = parseObject(await request.text()) || {};
+    const now = Date.now();
+    if (url.pathname === "/opened") {
+      if (typeof body.code === "string" && typeof body.network === "string") {
+        this.open.set(body.code, { network: body.network, until: now + kLifetime });
+      }
+      return json({});
+    }
+    if (url.pathname === "/closed") {
+      this.open.delete(String(body.code));
+      return json({});
+    }
+    // (a new match from a network that has kOpenHosts open already: refused until the oldest is joined or lapses;
+    // asking for one's own code again is not a new one)
+    if (body.action === "host" && body.network && !body.again) {
+      const mine = this.openOf(body.network, now);
+      if (mine.length >= kOpenHosts) {
+        const oldest = Math.min(...mine.map((o) => o.until));
+        return json({ wait: Math.max(1, Math.ceil((oldest - now) / 1000)), by: "open" });
+      }
+    }
+    const limits = kLimits[body.action];
+    if (!limits) {
+      return json({ wait: 0 });
+    }
+    if (limits.player && body.player) {
+      const wait = this.limiter.hit(`${body.action}:${await playerId(body.player) || body.player.slice(0, 12)}`, limits.player, now);
+      if (wait) {
+        return json({ wait, by: "player" });
+      }
+    }
+    if (limits.network && body.network) {
+      const wait = this.limiter.hit(`${body.action}@${body.network}`, limits.network, now);
+      if (wait) {
+        return json({ wait, by: "network" });
+      }
+    }
+    return json({ wait: 0 });
+  }
+}
+
 // The stats: by day (UTC), the matches hosted and joined by game; and the hosts waiting now (told every 15 seconds while
 // they wait, forgotten 30 seconds after the last)
 export class Stats {
@@ -552,7 +839,10 @@ export class Stats {
       }
       return json({ days, waiting, listed });
     }
-    const body = JSON.parse(await request.text());
+    const body = parseObject(await request.text());
+    if (!body) {
+      return json({ error: "not JSON" }, 400);
+    }
     const game = typeof body.game === "string" && body.game ? body.game.slice(0, 32) : "?";
     if (url.pathname === "/waiting") {
       this.waiting.set(String(body.code), { game, listed: body.listed === true, seen: now });

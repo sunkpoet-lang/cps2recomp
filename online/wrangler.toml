@@ -34,3 +34,16 @@ new_sqlite_classes = ["Room"]
 [[migrations]]
 tag = "v4"
 new_sqlite_classes = ["Stats"]
+
+# (this fork, ForkAde's online-abuse-protection) The counts for hosting, joining and looking up a code
+[[durable_objects.bindings]]
+name = "LIMITS_COUNTER"
+class_name = "Limits"
+
+[[migrations]]
+tag = "v5"
+new_sqlite_classes = ["Limits"]
+
+# Limits are only logged until this says "enforce" (online-abuse-protection's rollout: log first, then refuse)
+[vars]
+LIMITS = "log"
