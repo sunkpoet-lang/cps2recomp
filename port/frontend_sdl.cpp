@@ -19,6 +19,7 @@
 #include "../recomp-common/settings.h"
 #include "../recomp-common/folders.h"
 #endif
+#include "../recomp-common/volume.h"
 
 #include <SDL3/SDL.h>
 
@@ -183,7 +184,8 @@ namespace {
         {"In-game menu", "Esc, F1"}, {"Menu bar", "F10, Alt"},  {"Quick save", "F5"},        {"Quick load", "F9"},
         {"Screenshot", "F8"},
         {"Slot before, next", "F6, F7"}, {"Fullscreen", "F11"},   {"Soundtrack", "F12"},       {"Test switch", "F2"},
-        {"Pause", "P"},               {"One frame", "O"},          {"Slower, faster", "-, ="}, {"Restart", "Backspace"},
+        {"Pause", "P"},               {"One frame", "O"},          {"Slower, faster", "[, ]"}, {"Restart", "Backspace"},
+        {"Quieter, louder", "-, ="},
     };
 
     recomp::BarEntry BarItem(const char *label, int id, const char *shortcut = "", bool enabled = true) {
@@ -508,7 +510,15 @@ int RunWindowed(Port &port) {
     // (--mute starts with no sound; the menu's Sound row switches it on, so the device is opened all the same)
     SDL_AudioStream *audio = nullptr;
     port.menu.muted = port.opt.mute;
-    bool silent = false;
+    // (this fork, game-volume-control) the level: --volume, or the one kept; the streams' gain follows it (and
+    // mute) over a few frames, so a change does not click
+    port.menu.volume = port.opt.volume >= 0 ? ::recomp::ClampVolume(port.opt.volume) : port.KeptVolume();
+    float gainNow = 1.0f, musicGainNow = 1.0f;
+    const auto gainToward = [&](float &now) {
+        const float wanted = port.menu.muted || audioLog ? 0.0f : ::recomp::VolumeGain(port.menu.volume);
+        now += std::clamp(wanted - now, -0.25f, 0.25f);
+        return now;
+    };
     {
         const SDL_AudioSpec spec{SDL_AUDIO_S16, 2, QSound::kSampleRate};
         audio = SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &spec, nullptr, nullptr);
@@ -528,7 +538,6 @@ int RunWindowed(Port &port) {
     SDL_AudioStream *music = nullptr;
     SDL_AudioSpec musicSpec{SDL_AUDIO_F32, 2, 0};
     std::vector<float> musicMade;
-    bool musicSilent = false;
 
     std::vector<SDL_Gamepad *> gamepads;
     // The in-game menu: opened and closed by Esc, F1, a gamepad stick's click or its Start and Select
@@ -856,11 +865,11 @@ int RunWindowed(Port &port) {
                     picked += (picked.empty() ? "" : ",") + std::to_string(p);
                 }
                 printf("window %llu: bar %s [%s] (%zu open, strip %s), in-game menu %s, frame %llu, player 1 %04x, pointer %s, "
-                       "fullscreen %s, window %dx%d, slot %d, muted %s, slow by %d, notice \"%s\", online %s\"%s\"\n",
+                       "fullscreen %s, window %dx%d, slot %d, muted %s, volume %d%% (gain %.3f), slow by %d, notice \"%s\", online %s\"%s\"\n",
                        static_cast<unsigned long long>(loops), bar.IsOpen() ? "open" : "closed", picked.c_str(), bar.Boxes().size(), bar.BarShown() ? "shown" : "hidden",
                        port.menu.IsOpen() ? "open" : "closed", static_cast<unsigned long long>(port.frame), port.pad[0],
                        pointerShown ? "shown" : "hidden", isFullscreen() ? "yes" : "no", windowWidth, windowHeight, port.menu.Slot(), port.menu.muted ? "yes" : "no",
-                       port.menu.GameRate().ticks, port.tick < port.noticeUntil ? port.notice.c_str() : "", onlineOwner->Failed() ? "FAILED " : "",
+                       port.menu.volume, static_cast<double>(gainNow), port.menu.GameRate().ticks, port.tick < port.noticeUntil ? port.notice.c_str() : "", onlineOwner->Failed() ? "FAILED " : "",
                        onlineOwner->Message().c_str());
 #ifdef FORKADE_GAME_BROKER
                 if(port.opt.forkadeOnline)printf("forkade room: hosting=%d status=%s\n",port.menu.hosting,gameRoom.Label().c_str());
@@ -1039,8 +1048,12 @@ int RunWindowed(Port &port) {
                     port.Key('p'); // stops the game, and starts it again
                 } else if (!port.menu.IsOpen() && ev.key.scancode == SDL_SCANCODE_O) {
                     port.Key('o'); // on by one frame (held: frame after frame)
-                } else if (ev.key.scancode == SDL_SCANCODE_MINUS || ev.key.scancode == SDL_SCANCODE_EQUALS) {
-                    port.Key(ev.key.scancode == SDL_SCANCODE_MINUS ? '-' : '='); // slower, faster
+                } else if (ev.key.scancode == SDL_SCANCODE_MINUS || ev.key.scancode == SDL_SCANCODE_EQUALS ||
+                           ev.key.scancode == SDL_SCANCODE_KP_MINUS || ev.key.scancode == SDL_SCANCODE_KP_PLUS) {
+                    // (this fork, game-volume-control: the level, as Fightcade has it; online too)
+                    port.ChangeVolume(ev.key.scancode == SDL_SCANCODE_MINUS || ev.key.scancode == SDL_SCANCODE_KP_MINUS ? -1 : 1);
+                } else if (ev.key.scancode == SDL_SCANCODE_LEFTBRACKET || ev.key.scancode == SDL_SCANCODE_RIGHTBRACKET) {
+                    port.Key(ev.key.scancode == SDL_SCANCODE_LEFTBRACKET ? '-' : '='); // slower, faster
                 } else if (!port.menu.IsOpen() && ev.key.scancode == SDL_SCANCODE_BACKSPACE && !ev.key.repeat) {
                     port.Key('k', kKeyRestart);
                 } else if (!port.menu.IsOpen() && ev.key.scancode == SDL_SCANCODE_BACKSLASH && !ev.key.repeat) {
@@ -1420,9 +1433,11 @@ int RunWindowed(Port &port) {
             ran = port.Tick();
         }
 
-        if (audio && silent != (port.menu.muted || audioLog)) {
-            silent = port.menu.muted || audioLog;
-            SDL_SetAudioStreamGain(audio, silent ? 0.0f : 1.0f);
+        if (audio) {
+            const float before = gainNow;
+            if (gainToward(gainNow) != before || SDL_GetAudioStreamGain(audio) != gainNow) {
+                SDL_SetAudioStreamGain(audio, gainNow);
+            }
         }
         std::vector<int16_t> &made = port.machine->audio;
         if (audio && ran && !made.empty()) {
@@ -1470,9 +1485,11 @@ int RunWindowed(Port &port) {
                 }
             }
             if (music && !musicMade.empty()) {
-                if (musicSilent != (port.menu.muted || audioLog)) {
-                    musicSilent = port.menu.muted || audioLog;
-                    SDL_SetAudioStreamGain(music, musicSilent ? 0.0f : 1.0f);
+                {
+                    const float before = musicGainNow;
+                    if (gainToward(musicGainNow) != before || SDL_GetAudioStreamGain(music) != musicGainNow) {
+                        SDL_SetAudioStreamGain(music, musicGainNow);
+                    }
                 }
                 double waiting = SDL_GetAudioStreamQueued(music) / (8.0 * musicSpec.freq) / pace;
                 if (waiting > kAudioMost) {
@@ -1540,6 +1557,7 @@ int RunWindowed(Port &port) {
 #ifdef FORKADE_GAME_BROKER
     if(port.opt.forkadeOnline)gameRoom.Stop();
 #endif
+    port.KeepVolume(); // (this fork, game-volume-control: the level, for next time)
     for (SDL_Gamepad *gp : gamepads) {
         SDL_CloseGamepad(gp);
     }

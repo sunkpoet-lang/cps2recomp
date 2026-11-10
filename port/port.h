@@ -62,6 +62,7 @@ struct Options {
     uint64_t testFrom = 0, testTo = 0; // --test-switch FROM:TO: the operator's test switch held over these frames
     bool autoPlay = false;
     bool headless = false, mute = false, unthrottled = false, fullscreen = false, stats = false;
+    int volume = -1; // (this fork) --volume N: the level to start at (0-100); -1, the one kept in settings.ini
     bool hashPicture = false; // --hash-log hashes the picture only
     bool hashNoPicture = false; // --hash-no-picture: the state hash without the picture
     bool hashNoSound = false;   // --hash-no-sound: ... without the sound side (as online play's)
@@ -294,6 +295,13 @@ struct Port {
     bool hostedFromMenu = false;
     std::map<std::string, int> ownFeatures; // (as they were before the match's: put back by BackToSolo)
     std::string hostNote;                   // (why the hosting stopped, said for a few seconds: until hostNoteUntil)
+    // (this fork, game-volume-control) The level changed by - and = (or the keypad's): said for a second; and the
+    // level kept in settings.ini ([audio] volume), read at the start and written when it changed
+    std::string volumeNote;
+    uint64_t volumeNoteUntil = 0;
+    void ChangeVolume(int steps);
+    int KeptVolume() const;
+    void KeepVolume() const;
     uint64_t hostNoteUntil = 0;
     // Esc's question answered yes: the match left, and the game with it unless it was hosted from the menu
     void LeaveOnline();

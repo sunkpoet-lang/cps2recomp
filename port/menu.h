@@ -51,6 +51,7 @@ public:
     const char* CommandName(int id) const;
     // The "Sound" row: the frontend plays nothing while this is set (--mute starts with it set)
     bool muted = false;
+    int volume = 100; // (this fork, game-volume-control: the level, 0-100 percent, recomp-common/volume.h)
     bool hosting = false; // (a match hosted from the Online page, waited for: its row is Stop hosting)
     int Slot() const {
         return m_menu.Slot();
