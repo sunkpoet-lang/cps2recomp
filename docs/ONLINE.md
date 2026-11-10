@@ -82,10 +82,14 @@ cps2recomp-launcher --play sfa3 -- --join CODE             # the other player: t
 - **Coming back after a drop**: if the other player's game closes or their connection drops, the host's game stays
   open and waits for them with the same code; a joining player whose connection dropped is taken back to the host by
   itself. The two games then start over together from the title. (The host closing their game ends the match.)
-- **Win streaks**: in the fighting games, a player who wins two or more matches in a row against the other has it
-  said under their life bar ("STREAK 3"), counted from when both have pressed Start, until the streak ends.
-- **Names**: each player's name, as set on the launcher's Online page, is under their life bar (Hide names, on the
-  Online page, hides them).
+- **Names and win streaks** (this fork): one see-through strip at the top of the picture, over the score and above
+  the life bars and the timer, as Fightcade has it: "Name1  3  VS  0  Name2", player 1 in blue, player 2 in red. The
+  numbers are each player's matches won in a row against the other, in the fighting games, counted from when both
+  have pressed Start. Each name is as set on the launcher's Online page (Hide names, on the Online page, hides them).
+- **The connection** (this fork, ForkAde's online): ping, delay and the last rollback one a row at the top right, in
+  small yellow letters, and how many watch at the top left.
+- **Tab** (this fork): online, shows or hides the names' strip and the connection rows; the match's messages and the
+  chat stay. The in-game menu is on Esc and F1. Offline, Tab opens the menu as before.
 - **Chat**: press T on the keyboard, a gamepad's right stick click, or the touch screen's Chat button, type a line and
   press Enter (Esc, or the click again, puts it away). The Steam Deck and phones show their own on-screen keyboard.
   The last few lines show at the bottom left for a few seconds, and under them how to chat (as a match begins) and
