@@ -56,6 +56,7 @@ struct OnlineOptions {
     int chatLoss = 0;     // (this fork) --chat-loss PCT: (tests) that share of the chat's packets dropped as sent
     int spectators = 6;   // (this fork) the host's: how many may watch (0: none, the match refuses them)
     int spectatorDelay = 15; // (this fork) a spectator's: the frames it stays behind the confirmed match
+    bool spectate = false;   // (this fork) --gekko-spectate: a --gekko-join that watches (the launcher's Watch)
 };
 
 // (this fork) The session also carries the in-game chat (ChatLink): ForkAde's docs/chat-protocol.md, its C and A

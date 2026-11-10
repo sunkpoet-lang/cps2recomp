@@ -2826,7 +2826,8 @@ void Usage() {
             "                         HOST:PORT, player 2;\n"
             "  --gekko-delay N        ... the local controls N frames late (1); --gekko-stress: rollback every frame (online.h)\n"
             "  --gekko-watch HOST:PORT  (this fork) watch that host's match; --gekko-spectators N: how many may watch the\n"
-            "                         host's (6; 0 none); --gekko-spectator-delay N: frames a spectator stays behind (15)\n"
+            "                         host's (6; 0 none); --gekko-spectator-delay N: frames a spectator stays behind (15);\n"
+            "                         --gekko-spectate: a --gekko-join that watches (the ForkAde launcher's Watch)\n"
             "  --cpu MODE             native (translated code), blocks (the interpreter run the same way),\n"
             "                         interp (the interpreter, an instruction at a time), check\n"
             "  --sound SIDE           driver (the sound program as ordinary code), z80 (the program itself),\n"
@@ -3104,6 +3105,8 @@ bool ParseArgs(int argc, char **argv, port::Options &o) {
             if (colon != std::string::npos) {
                 o.gekko.port = static_cast<uint16_t>(atoi(v.c_str() + colon + 1));
             }
+        } else if (a == "--gekko-spectate") {
+            o.gekko.spectate = true; // (the launcher's Watch: its --gekko-join, as a spectator)
         } else if (a == "--gekko-spectators") {
             o.gekko.spectators = atoi(next());
         } else if (a == "--gekko-spectator-delay") {
@@ -3172,6 +3175,9 @@ bool ParseArgs(int argc, char **argv, port::Options &o) {
             Usage();
             return false;
         }
+    }
+    if (o.gekko.spectate && o.gekko.mode == port::OnlineOptions::Mode::Join) {
+        o.gekko.mode = port::OnlineOptions::Mode::Watch;
     }
     o.gekko.matchFlow = o.gekko.matchFlow || o.forkadeOnline;
     o.gekko.arcadeWait = o.gekko.mode==port::OnlineOptions::Mode::Host && (o.gekko.arcadeWait || o.forkadeOnline);
