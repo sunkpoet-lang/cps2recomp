@@ -378,7 +378,7 @@ def main():
         places = {}
         if args.places and os.path.exists(args.places):
             # (the list is between the lines "places: begin" and "places: end"; none: the sources' own game)
-            text = open(args.places).read()
+            text = open(args.places, encoding="utf-8").read()
             if "places: begin" in text and "places: end" in text:
                 text = text.split("places: begin", 1)[1].split("places: end", 1)[0]
                 places = {int(a, 16): int(b, 16) for a, b in
@@ -390,13 +390,13 @@ def main():
             if value not in places:
                 sys.exit("recomp: the sources name At(0x%06X), and %s does not say where that is" % (value, args.places))
             return places[value]
-        texts = [open(os.path.join(d, name)).read() for d in folders for name in sorted(os.listdir(d))
+        texts = [open(os.path.join(d, name), encoding="utf-8").read() for d in folders for name in sorted(os.listdir(d))
                  if name.endswith((".cpp", ".h"))]
         names = {}
         if args.places and os.path.exists(args.places):
             # (a game's family.h may name places of its own, written as they are: hooks the sources make there)
             names.update((n, int(v, 0)) for n, v in
-                         re.findall(r"\b(k\w+)\s*=\s*(0x[0-9A-Fa-f]+|\d+)\b", open(args.places).read()))
+                         re.findall(r"\b(k\w+)\s*=\s*(0x[0-9A-Fa-f]+|\d+)\b", open(args.places, encoding="utf-8").read()))
         for text in texts:
             names.update((n, at(w, int(v, 16))) for n, w, v in
                          re.findall(r"\b(k\w+)\s*=\s*(?:\w+::)?(At\(\s*)?0x([0-9A-Fa-f]+)", text))
