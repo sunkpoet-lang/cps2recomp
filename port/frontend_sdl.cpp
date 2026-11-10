@@ -789,7 +789,7 @@ int RunWindowed(Port &port) {
         isOnline=true;return true;
     },[&] {
         if(!roomSession)return;
-        roomSession=false;onlineOwner->Stop();port.ChatTick();onlineOwner=std::make_unique<Online>();isOnline=false;
+        roomSession=false;onlineOwner->Stop();port.ChatTick();onlineOwner=std::make_unique<Online>();isOnline=false;port.onlineOverlayHidden=false;
         port.opt.gekko.mode=OnlineOptions::Mode::Off;
         for(const auto& entry:savedFeatures)SetFeatureForNow(entry.first.c_str(),entry.second);
         savedFeatures.clear();port.opt.hashNoPicture=oldHashPicture;port.opt.hashNoSound=oldHashSound;
@@ -1035,7 +1035,18 @@ int RunWindowed(Port &port) {
                 } else if (ev.key.scancode == SDL_SCANCODE_ESCAPE || ev.key.scancode == SDL_SCANCODE_F1 || ev.key.scancode == SDL_SCANCODE_AC_BACK ||
                            (ev.key.scancode == SDL_SCANCODE_TAB && !KeyBound(SDL_SCANCODE_TAB))) {
                     // (AC_BACK: a phone's Back)
-                    toggleMenu();
+                    // (this fork, online-hud: in a live online session Tab shows or hides the names' strip and the
+                    // connection rows instead; the menu stays on Esc and F1)
+                    const bool live = port.net ? !port.connecting
+                                               : isOnline && port.Match() && port.Match()->ReadMatch().phase != MatchView::Phase::Waiting &&
+                                                     port.Match()->ReadMatch().phase != MatchView::Phase::Ended;
+                    if (ev.key.scancode == SDL_SCANCODE_TAB && live) {
+                        if (!ev.key.repeat) {
+                            port.onlineOverlayHidden = !port.onlineOverlayHidden;
+                        }
+                    } else {
+                        toggleMenu();
+                    }
                 } else if (port.Chat() && ev.key.scancode == chatKey && !ev.key.repeat) {
                     // (this fork: online, the chat's key the match began with: T, Y where T is a game key, or T where
                     // both are, which online is then the chat's)
@@ -1591,11 +1602,40 @@ int RunWindowed(Port &port) {
                 const recomp::text::Color colour = match.failed ? recomp::text::Color{255, 120, 110, 255} : recomp::text::Color{255, 255, 255, 255};
                 canvas.Text(x, y, 1, 0, colour, message.c_str());
             }
+            // (this fork, online-hud) The connection's values in short rows at the top right, in the player 2 score
+            // area, and how many watch (or WATCHING, on a spectator's screen) at the top left, in player 1's:
+            // see-through, in the small yellow font (online-hud-palette), one value a row at a 6-dot step, the third
+            // ending at row 17, above Champion Edition's life bar (row 18). Tab hides them
             const std::string &stats = match.stats;
-            if (!stats.empty()) {
-                const float wide = recomp::text::TextWidth(stats.c_str(), 1);
-                canvas.Fill(across - wide - 6, lines - 12, wide + 4, 11, {20, 22, 30, 160});
-                canvas.Text(across - wide - 4, lines - 11, 1, 0, {200, 220, 255, 255}, stats.c_str());
+            if (!stats.empty() && !port.onlineOverlayHidden) {
+                std::vector<std::string> right;
+                std::string left;
+                if (match.stress) {
+                    right = {stats};
+                } else if (match.spectating) {
+                    left = "WATCHING";
+                    right = {"PING " + std::to_string(match.ping)};
+                } else {
+                    right = {"PING " + std::to_string(match.ping), "DELAY " + std::to_string(match.delay)};
+                    if (match.rollback >= 0) {
+                        right.push_back("ROLLBACK " + std::to_string(match.rollback));
+                    }
+                    if (match.watching > 0) {
+                        left = std::to_string(match.watching) + " WATCHING";
+                    }
+                }
+                using recomp::text::Palette;
+                const float step = recomp::text::kSmallLineHeight;
+                for (size_t n = 0; n < right.size() && n < 3; n++) {
+                    const float wide = recomp::text::SmallTextWidth(right[n].c_str());
+                    canvas.Fill(across - wide - 3, step * n, wide + 3, step, Palette::kBand);
+                    canvas.SmallText(across - wide - 1, 1 + step * n, Palette::kReadout, right[n].c_str());
+                }
+                if (!left.empty()) {
+                    const float leftWide = recomp::text::SmallTextWidth(left.c_str());
+                    canvas.Fill(0, 0, leftWide + 3, step, Palette::kBand);
+                    canvas.SmallText(2, 1, Palette::kReadout, left.c_str());
+                }
             }
         }
         if(port.opt.gekko.matchFlow && port.opt.shotEvery && loops%port.opt.shotEvery==0) {

@@ -1494,7 +1494,13 @@ MatchView Online::ReadMatch() const {
         GekkoNetworkStats stats{};
         gekko_network_stats(m_session, m_remote, &stats);
         view.ping = static_cast<int>(stats.last_ping);
+        GekkoRollbackStats rollbacks{};
+        gekko_rollback_stats(m_session, &rollbacks);
+        view.rollback = static_cast<int>(rollbacks.last_frames);
     }
+    view.stress = m_options.mode == OnlineOptions::Mode::Stress;
+    view.spectating = Spectating();
+    view.watching = ChatHost() ? Watching() : m_seenWatching;
     // Arcade, code, invitations, leave/loss reasons and silence timing await their flow implementation.
     return view;
 }

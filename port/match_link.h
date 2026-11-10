@@ -18,6 +18,10 @@ struct MatchView {
     std::optional<uint64_t> silentMs;
     std::array<std::string, 2> names;
     std::string message, code, invited, invitation, stats;
+    // (this fork, online-hud) The readout's values one by one, for its rows: the last rollback's frames (-1: not
+    // known), how many watch, and whether this side is a spectator; stress: the stress test's own line, as stats
+    int rollback = -1, watching = 0;
+    bool spectating = false, stress = false;
 };
 
 class MatchLink {
