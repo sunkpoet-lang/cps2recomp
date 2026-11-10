@@ -980,9 +980,11 @@ void Online::Pump() {
         if (!m_socket->havePeer && m_socket->host) {
             // (this fork, online-abuse-protection: the first hello is taken as the peer only if it is this game's;
             // anything else is refused and the host goes on waiting, so a stranger's garbage cannot end its match)
+            // (on a copy: RecoveryHelloNonce takes the nonce off what it is given, which the checks below need whole)
+            std::vector<uint8_t> checked = said;
             uint64_t theirNonce = 0;
-            const bool compatible = !m_options.matchFlow || RecoveryHelloNonce(said, theirNonce);
-            if (const std::string why = Mismatch(said, compatible); !why.empty()) {
+            const bool compatible = !m_options.matchFlow || RecoveryHelloNonce(checked, theirNonce);
+            if (const std::string why = Mismatch(checked, compatible); !why.empty()) {
                 m_socket->Refuse(why, from);
                 continue;
             }
