@@ -12,6 +12,7 @@
 
 #include "../recomp-common/text.h"
 #include "../runtime/game.h"
+#include "../runtime/spare.h"
 #include "../recomp-common/gamepads.h"
 #include "online.h"
 #ifdef FORKADE_GAME_BROKER
@@ -365,13 +366,20 @@ int RunWindowed(Port &port) {
     // (the picture's shape: the board's 384 x 224 shown 4:3 unless the Display page says otherwise, and as
     // much wider as the widest picture the game's sources may ask for; 4:3 for a picture that fills it)
     const int columns = TheGame().widestPicture ? std::clamp(TheGame().widestPicture(), +Video::kWidth, +Video::kMaxWidth) : Video::kWidth;
-    auto windowShape = [](int across) { return PictureShape(across, Video::kHeight, DisplayShape(), 4.0f / 3.0f * across / Video::kWidth); };
+    auto windowShape = [](int across) {
+        // (a vertical game's picture turned upright: Turned)
+        return Turned() ? PictureShape(Video::kHeight, across, DisplayShape(), 3.0f / 4.0f * Video::kWidth / across)
+                        : PictureShape(across, Video::kHeight, DisplayShape(), 4.0f / 3.0f * across / Video::kWidth);
+    };
+    // (the window's height for so many times the board's lines: a third more for a picture stood upright, its rows the
+    // board's columns)
+    auto windowTall = [](int times) { return Turned() ? Video::kHeight * times * 4 / 3 : Video::kHeight * times; };
     // (in a Multi game run, a window where the game before's was: a full screen one is full screen as asked)
     Placement placed;
     const bool carried = !MultiGame().empty() && TakePlacement(placed) && !port.opt.fullscreen;
     // (this fork: and above the picture the menu bar's strip, as many times its dots: none full screen)
     const int strip = port.opt.fullscreen ? 0 : recomp::MenuBar::kHeightDots * scale;
-    const int windowHeight = carried ? placed.height : Video::kHeight * scale + strip;
+    const int windowHeight = carried ? placed.height : windowTall(scale) + strip;
     // The window, as an OpenGL window for a shader (shading.h: nothing else draws to it), `at` a place for it (`width`
     // 0: as wide as the picture's shape makes it)
     auto makeWindow = [&](bool opengl, const Placement *at, int width, int height, bool fullscreen) {
@@ -488,6 +496,10 @@ int RunWindowed(Port &port) {
         SDL_GetWindowSize(window, &width, &at.height);
         at.maximized = SDL_GetWindowFlags(window) & SDL_WINDOW_MAXIMIZED;
         const bool fullscreen = SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN;
+        port.gpuPicture.Close(); // (its resources are the presenter's device's)
+        for (auto &g : port.guestPictures) {
+            g.picture->Close();
+        }
         presenter.Close();
         SDL_DestroyWindow(window);
         preset = next;
@@ -547,7 +559,7 @@ int RunWindowed(Port &port) {
     uint32_t menuWidth = 0, menuHeight = 0;
     bool menuDirty = false;
     uint16_t previousPad = 0, heldAtClose = 0;
-    unsigned previousMenu = 0;
+    recomp::MenuRepeat menuRepeat; // (the arrows held go on through the rows and the choices)
     int triggerHeld = 0;
     bool bothHeld = false; // a gamepad's Start and Select (Back) together: the menu
     // (with a zoom to work, the left stick's click opens the menu when it is let go, unless a shoulder was pressed
@@ -1273,7 +1285,7 @@ int RunWindowed(Port &port) {
                 menuNow |= SDL_GetGamepadButton(gp, SDL_GAMEPAD_BUTTON_EAST) ? recomp::kMenuBack : 0;
             }
             menuNow |= touch.Menu();
-            // (the gamepad's part of it)
+            // (this fork: the gamepad's part of it, for the menu bar)
             for (SDL_Gamepad *gp : gamepads) {
                 padMenu |= SDL_GetGamepadButton(gp, SDL_GAMEPAD_BUTTON_DPAD_UP) ? recomp::kMenuUp : 0;
                 padMenu |= SDL_GetGamepadButton(gp, SDL_GAMEPAD_BUTTON_DPAD_DOWN) ? recomp::kMenuDown : 0;
@@ -1282,8 +1294,7 @@ int RunWindowed(Port &port) {
                 padMenu |= SDL_GetGamepadButton(gp, SDL_GAMEPAD_BUTTON_SOUTH) ? recomp::kMenuConfirm : 0;
                 padMenu |= SDL_GetGamepadButton(gp, SDL_GAMEPAD_BUTTON_EAST) ? recomp::kMenuBack : 0;
             }
-            unsigned menuPressed = menuNow & ~previousMenu;
-            previousMenu = menuNow;
+            unsigned menuPressed = menuRepeat.Step(menuNow);
             if (both) {
                 menuPressed = 0;
             }
@@ -1324,17 +1335,18 @@ int RunWindowed(Port &port) {
         {
             static int shownColumns = columns, shownSize = scale;
             static Shape shownShape = DisplayShape();
+            static bool shownTurned = Turned();
             const int now = TheGame().widestPicture ? std::clamp(TheGame().widestPicture(), +Video::kWidth, +Video::kMaxWidth) : columns;
             const int size = port.opt.scale > 0 ? port.opt.scale : WindowSize();
-            if (now != shownColumns || DisplayShape() != shownShape || size != shownSize) {
+            if (now != shownColumns || DisplayShape() != shownShape || size != shownSize || Turned() != shownTurned) {
                 if (!(SDL_GetWindowFlags(window) & (SDL_WINDOW_FULLSCREEN | SDL_WINDOW_MAXIMIZED))) {
                     int windowWidth = 0, windowHeight = 0;
                     SDL_GetWindowSize(window, &windowWidth, &windowHeight);
                     // (the picture's part of it: below the bar's strip, in the window's points)
                     const float density = SDL_GetWindowPixelDensity(window) > 0 ? SDL_GetWindowPixelDensity(window) : 1.0f;
                     int pictureHeight = windowHeight - static_cast<int>(std::lround(BarStrip(static_cast<int>(windowHeight * density)) / density));
-                    if (size != shownSize) {
-                        pictureHeight = Video::kHeight * size;
+                    if (size != shownSize || Turned() != shownTurned) {
+                        pictureHeight = windowTall(size);
                         windowHeight = pictureHeight + recomp::MenuBar::kHeightDots * size;
                     }
                     SDL_SetWindowSize(window, static_cast<int>(std::lround(pictureHeight * windowShape(now))), windowHeight);
@@ -1342,6 +1354,7 @@ int RunWindowed(Port &port) {
                 shownColumns = now;
                 shownShape = DisplayShape();
                 shownSize = size;
+                shownTurned = Turned();
             }
         }
         followShader();
@@ -1360,8 +1373,17 @@ int RunWindowed(Port &port) {
         }
         const bool fullscreen = isFullscreen();
         const int barStrip = fullscreen ? 0 : BarStrip(height);
-        SDL_FRect where = FitPicture(width, height - barStrip, port.ShownWidth(), Video::kHeight, DisplayShape(), DisplayScaling());
+        // (a vertical game's picture turned upright: as many columns as the board's lines, as many rows as its columns;
+        // the menu stays as it is, over the turned picture in its middle: Port::MenuPicture)
+        const bool turned = Turned();
+        SDL_FRect where = turned ? FitPicture(width, height - barStrip, Video::kHeight, port.ShownWidth(), DisplayShape(), DisplayScaling())
+                                 : FitPicture(width, height - barStrip, port.ShownWidth(), Video::kHeight, DisplayShape(), DisplayScaling());
         where.y += barStrip;
+        SDL_FRect menuWhere = where;
+        if (turned) {
+            menuWhere = FitPicture(width, height - barStrip, port.ShownWidth(), Video::kHeight, DisplayShape(), DisplayScaling());
+            menuWhere.y += barStrip;
+        }
         touch.Layout(width, height, where);
         int touchWidth = 0, touchHeight = 0;
         if (touch.TakePicture(touchPicture, touchWidth, touchHeight) && !touchPicture.empty()) {
@@ -1405,7 +1427,7 @@ int RunWindowed(Port &port) {
                 port.menu.Draw(menuPicture.data(), static_cast<int>(menuWidth), static_cast<int>(menuHeight));
             }
             // (not through a shader: the menu is drawn three times the board's size, and is not the game's picture)
-            presenter.Show(menuPicture.data(), static_cast<int>(menuWidth), static_cast<int>(menuHeight), where, nullptr, false);
+            presenter.Show(menuPicture.data(), static_cast<int>(menuWidth), static_cast<int>(menuHeight), menuWhere, nullptr, false);
             if (isOnline) {
                 // (online, the game goes on behind the menu, with this side's controls let go, unheard)
                 const uint16_t none[2] = {};
@@ -1504,6 +1526,46 @@ int RunWindowed(Port &port) {
 
         // (zoomed: the part of the picture the camera looks at, the readout's panels as they are)
         Zoomed zoomed;
+        // (--video gpu: the game's picture drawn on the GPU from the native records, with the readouts over it, when the
+        // presenter draws with SDL_GPU and the GPU can draw the frame: gpu_picture.h; else the CPU's picture. (This fork)
+        // not online, whose notices are drawn on the CPU's picture below)
+        bool drawn = false;
+        if (port.gpuWanted && presenter.UsesGpu() && !presenter.Shaded() && !turned && !isOnline) {
+            if (port.gpuPicture.Device() != presenter.Device()) {
+                port.gpuPicture.Close();
+                for (auto &g : port.guestPictures) {
+                    g.picture->Close();
+                }
+                std::string gpuError;
+                bool guestsOpen = true;
+                for (auto &g : port.guestPictures) {
+                    guestsOpen = guestsOpen && g.picture->Open(presenter.Device(), g.roms->graphics.data(), g.roms->graphics.size(), gpuError);
+                }
+                if (!guestsOpen ||
+                    !port.gpuPicture.Open(presenter.Device(), port.roms.graphics.data(), port.roms.graphics.size(), gpuError) ||
+                    (!port.extraRoms.graphics.empty() &&
+                     !port.gpuPicture.SetExtraGraphics(port.extraRoms.graphics.data(), port.extraRoms.graphics.size(), gpuError))) {
+                    fprintf(stderr, "--video gpu: %s; the CPU's picture is shown\n", gpuError.c_str());
+                    port.gpuWanted = false;
+                }
+            }
+            // (not with the panel drawn apart, which the GPU's picture does not do: zoom.h, by distance)
+            if (port.gpuWanted && port.gpuPicture.CanDrawKept() && port.gpuPicture.KeptWidth() == port.ShownWidth() &&
+                !cps2recomp::PictureMade() && !port.zoom.KeepsPanel()) {
+                static std::vector<uint32_t> readouts;
+                const bool isZoomed = port.Windowed(readouts, zoomed, true);
+                drawn = presenter.ShowDrawn(
+                    [&](SDL_GPUCommandBuffer *commands) { return port.gpuPicture.DrawKept(commands, readouts.data(), isZoomed); },
+                    port.ShownWidth(), Video::kHeight, where, isZoomed ? &zoomed : nullptr);
+            }
+        }
+        if (!drawn && turned) {
+            // (the camera's zoom is a fighting game's: not with the picture turned)
+            static std::vector<uint32_t> upright;
+            port.Windowed(shown, zoomed);
+            TurnPicture(shown.data(), port.ShownWidth(), upright);
+            presenter.Show(upright.data(), Video::kHeight, port.ShownWidth(), where, nullptr);
+        } else if (!drawn) {
         const bool isZoomed = port.Windowed(shown, zoomed);
 #ifdef FORKADE_GAME_BROKER
         if(port.opt.forkadeOnline) {
@@ -1541,6 +1603,7 @@ int RunWindowed(Port &port) {
             WritePng(path.c_str(),shown.data(),port.ShownWidth(),Video::kHeight);
         }
         presenter.Show(shown.data(), port.ShownWidth(), Video::kHeight, where, isZoomed ? &zoomed : nullptr);
+        }
 
         if (!port.opt.unthrottled && !FastForward()) {
             paceFrame();
@@ -1574,6 +1637,10 @@ int RunWindowed(Port &port) {
 #ifdef __APPLE__
         HandFrontToLauncher();
 #endif
+    }
+    port.gpuPicture.Close();
+    for (auto &g : port.guestPictures) {
+        g.picture->Close();
     }
     presenter.Close();
     SDL_DestroyWindow(window);

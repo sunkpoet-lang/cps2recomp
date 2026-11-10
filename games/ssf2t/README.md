@@ -81,8 +81,7 @@ the same program ([how it was made](PROGRESS.md)).
   folder of music plays as a playlist (in order or shuffled), or files named for the game's songs replace those
   songs. [The list of its songs](../../docs/SONGS.md#super-street-fighter-ii-turbo) names the music: each stage's
   tune and its faster version once a fighter's health is low (`ryu_later`), the final fight, the introduction and
-  title, player select, versus, the winner's, the ranking, Ryu's ending and the staff roll. In this fork `F12`
-  switches between it and the board's music at once, mid-song.
+  title, player select, versus, the winner's, the ranking, Ryu's ending and the staff roll.
   [How →](../../docs/SOUNDTRACK.md)
 - Your ROM set is only ever read. Settings, save states and the board's settings memory go in your own user folder.
 
@@ -189,8 +188,7 @@ ROM set (drop `ssf2xjr1.zip` or its folder on the window, or choose the folder y
 away; the game's own program (`ssf2t`, beside the launcher) runs by itself too: `ssf2t --help` lists what it takes.
 
 While playing, Esc or `F1` (on a gamepad, the left stick's click, or Start and Select together) opens the in-game
-menu. Only the menu's "Quit game" row (or closing the window) ends the game. `F12` switches between a custom
-soundtrack and the board's music.
+menu. Only the menu's "Quit game" row (or closing the window) ends the game.
 
 ## Building from source
 
@@ -216,5 +214,3 @@ nothing from the game, ever).
 
 GPL-3.0-only (see [LICENSE](../../LICENSE)); [THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md) lists what comes
 from other projects. The repository holds no game data and nothing derived from it.
-
-**Its sources are shared (this fork).** [Hyper Street Fighter II](../hsf2/README.md) builds them too: every place they name in the program or the memory is written `At(0x...)` (src/places.h), which here is the place itself (family.h has no list) and there is where that place is in that game; what else differs (the game's steps, the players' records past +2B4, the boxes' layout, the choice's tune) is in each game's family.h. Super Turbo plays the same, frame for frame.

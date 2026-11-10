@@ -78,7 +78,7 @@ if (NOT GEN_Z80_SOURCES)
 endif ()
 
 set(MACHINE_SOURCES
-    video/video.cpp
+    video/video.cpp video/native.cpp video/native_render.cpp
     sound/z80.cpp sound/qsound.cpp sound/driver.cpp sound/okim6295.cpp third_party/ymfm_opm.cpp
     machine/m68k.cpp machine/machine.cpp machine/cps1_sound.cpp machine/sound_board.cpp machine/soundtrack.cpp machine/eeprom.cpp machine/romset.cpp machine/cps2crypt.cpp machine/kabuki.cpp
     runtime/recomp.cpp runtime/recomp_z80.cpp
@@ -116,7 +116,7 @@ FetchContent_MakeAvailable(gekkonet)
 # (the version both players of an online match must have: VERSION's)
 file(STRINGS "${CMAKE_SOURCE_DIR}/VERSION" CPS2RECOMP_VERSION LIMIT_COUNT 1)
 
-set(PORT_SOURCES port/main.cpp port/online.cpp port/frontend_sdl.cpp port/present.cpp port/shading.cpp port/zoom.cpp port/menu.cpp port/hud.cpp port/touch.cpp port/soundtrack.cpp port/netplay.cpp recomp-common/launcher/src/online.cpp recomp-common/launcher/src/run_program.cpp port/decoders.cpp recomp-common/menu.cpp recomp-common/menubar.cpp recomp-common/chat.cpp recomp-common/settings.cpp runtime/game.cpp runtime/board.cpp runtime/spare.cpp runtime/guest.cpp fight/frames.cpp fight/training.cpp fight/colours.cpp fight/colour_editor.cpp fight/battle.cpp fight/alternative.cpp fight/session.cpp fight/tag.cpp fight/marvel.cpp fight/guest_stages.cpp beat/modes.cpp beat/model.cpp model/model.cpp ${GAME_SOURCES})
+set(PORT_SOURCES port/main.cpp port/online.cpp port/gpu_picture.cpp port/frontend_sdl.cpp port/present.cpp port/shading.cpp port/zoom.cpp port/menu.cpp port/hud.cpp port/touch.cpp port/soundtrack.cpp port/netplay.cpp recomp-common/launcher/src/online.cpp recomp-common/launcher/src/run_program.cpp port/decoders.cpp recomp-common/menu.cpp recomp-common/menubar.cpp recomp-common/chat.cpp recomp-common/settings.cpp runtime/game.cpp runtime/board.cpp video/lifts.cpp runtime/spare.cpp runtime/guest.cpp fight/frames.cpp fight/training.cpp fight/colours.cpp fight/colour_editor.cpp fight/battle.cpp fight/alternative.cpp fight/session.cpp fight/tag.cpp fight/marvel.cpp fight/guest_stages.cpp beat/modes.cpp beat/model.cpp model/model.cpp shmup/modes.cpp ${GAME_SOURCES})
 
 # (the sound files' decoders, third_party/, are other projects' code, compiled as they are)
 set_source_files_properties(port/decoders.cpp PROPERTIES COMPILE_OPTIONS "-w")
@@ -154,7 +154,7 @@ if (WIN32)
     endif ()
 endif ()
 foreach (target ${GAME} ${GAME}-check)
-    target_include_directories(${target} PRIVATE runtime port machine fight beat model "${WORK_DIR}/gen" "${GAME_DIR}" ${GAME_INCLUDES})
+    target_include_directories(${target} PRIVATE runtime port machine fight beat model shmup "${WORK_DIR}/gen" "${GAME_DIR}" ${GAME_INCLUDES})
     target_link_libraries(${target} PRIVATE SDL3::SDL3 ZLIB::ZLIB GekkoNet)
     if (APPLE)
         target_link_libraries(${target} PRIVATE "-framework AppKit")

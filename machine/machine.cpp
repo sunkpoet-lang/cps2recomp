@@ -67,6 +67,21 @@ Machine::Machine(const RomSet &roms)
     cpu.ram = ram.data();
     cpu.video = videoRam.data();
     cpu.videoSize = static_cast<uint32_t>(videoRam.size());
+    nativeVideo.videoRam = videoRam.data();
+    nativeVideo.paletteControl = roms.board.paletteControl;
+    nativeVideo.layerControl = roms.board.layerControl;
+    nativeVideo.cps1Masks = m_cps1 ? m_roms.board.priority : nullptr;
+    if (m_cps1) {
+        nativeVideo.SetCps1(m_roms.board.enable);
+        // (its graphics mapper as a table, for the picture from the records and the GPU's)
+        if (!MakeGfxTable(m_roms.board, m_gfxTable)) {
+            fprintf(stderr, "game.cfg's gfx_map: a range that is not whole steps of %X: the picture from the records has no map\n",
+                    GfxTable::kStep);
+        }
+        nativeVideo.SetGfx(&m_gfxTable);
+    }
+    nativeVideo.SetGraphics(roms.graphics.data(), roms.graphics.size());
+    cpu.nativeVideo = &nativeVideo;
     cpu.rom = roms.program.data();
     cpu.opcodes = roms.opcodes.data();
     cpu.romSize = static_cast<uint32_t>(roms.program.size());
@@ -106,6 +121,7 @@ void Machine::Reset() {
     cpsA[2] = 0x9040;
     cpsA[3] = 0x9080;
     cpsA[4] = 0x9100;
+    nativeVideo.Reset(cpsA, cpsB, objectRegs); // (the game's side starts where the board does)
     m_line = 0;
     m_lineStart = 0;
     cpu.cycles = 0;
@@ -169,9 +185,28 @@ void Machine::RunFrame() {
     }
     video.wide.side = std::clamp(video.wide.side, 0, static_cast<int>(Video::kMaxSide));
     m_pictureWidth = video.Width();
+    // (the panel drawn apart for the zoom: Unpanelled; not over a picture the game's sources put together with marks of
+    // their own, nor while the records are checked against the board's lines)
+    // (the panel's objects told from the rest when the object list is taken, at the end of the frame before, which is when
+    // the records' renderer notes each object's marks: native_render.h; unless the game's sources tell them themselves)
+    if (panel.object && !video.panelObject) {
+        video.panelObject = m_panelMarks = panel.object;
+    } else if (!panel.object && m_panelMarks) {
+        if (video.panelObject == m_panelMarks) {
+            video.panelObject = nullptr;
+        }
+        m_panelMarks = nullptr;
+    }
+    m_panelDrawing = panel.object && drawing && !video.markObjects && !video.markLayers && !video.markFront && !video.layerProbe &&
+                     !nativeVideo.checking;
+    if (m_panelDrawing && m_unpanelled.size() != m_picture.size()) {
+        m_unpanelled.assign(m_picture.size(), 0);
+        m_panelPixels.assign(m_picture.size(), 0);
+    }
     do {
         RunLine();
     } while (m_line != kBlankingLine);
+    m_panelDrawn = m_panelDrawing;
     soundtrack.Frame();
     frame++;
     // (CPS2RECOMP_BUS_LOG=FILE: each frame's bus waits and DMA clocks, with the board's timing; docs/TIMING.md)
@@ -203,8 +238,18 @@ void Machine::RunLine() {
         UpdateInterruptLevel();
         if (m_cps1) {
             video.LatchObjectsCps1();
+            if (nativeVideo.Active()) {
+                nativeVideo.frame = frame;
+                nativeVideo.BoardObjectsCps1(native_video::DecodeObjectsCps1(videoRam.data(), cpsA), video.Options());
+            }
         } else {
             video.LatchObjects(&objectRam[m_objectBank ? 0x2000 : 0], m_extra ? objectsFromExtra[m_objectBank ? 1 : 0] : nullptr);
+            if (nativeVideo.Active()) {
+                nativeVideo.frame = frame;
+                nativeVideo.BoardObjects(native_video::DecodeObjects(&objectRam[m_objectBank ? 0x2000 : 0], objectRegs,
+                                                                  m_extra ? objectsFromExtra[m_objectBank ? 1 : 0] : nullptr),
+                                         video.Options());
+            }
         }
     }
 
@@ -227,11 +272,63 @@ void Machine::RunLine() {
 
     RunSound(kSoundCyclesPerLine);
 
+    if (nativeVideo.checking && m_line >= Video::kFirstLine && m_line < Video::kFirstLine + Video::kHeight) {
+        // (the registers the line is drawn with, as the game's side has them: --video check)
+        nativeVideo.frame = frame;
+        nativeVideo.BoardLayers(native_video::DecodeLayers(cpsA, cpsB, objectRegs, m_roms.board.layerControl, nativeVideo.cps1Masks),
+                                m_line - Video::kFirstLine);
+    }
     if (drawing && m_line >= Video::kFirstLine && m_line < Video::kFirstLine + Video::kHeight) {
         const int row = m_line - Video::kFirstLine;
-        video.RenderLine(row, &m_picture[static_cast<size_t>(row) * m_pictureWidth]);
+        uint32_t *out = &m_picture[static_cast<size_t>(row) * m_pictureWidth];
+        // (--video native: the line drawn from the game's side's records, with no model of the board's video chips; but
+        // before the game's first object list, and for a tool that probes the layers: video.cpp)
+        auto draw = [&](uint32_t *to) {
+            if (!(nativeVideo.drawsPicture && !video.layerProbe && nativeVideo.DrawLine(row, to, video.Options()))) {
+                video.RenderLine(row, to);
+            }
+        };
+        // (a machine whose picture another draws from its records keeps only them, but for a check: ownPicture)
+        if (!ownPicture && !nativeVideo.checking) {
+        } else if (m_panelDrawing) {
+            DrawPanelApart(row, out, draw);
+        } else {
+            draw(out);
+        }
+        if (nativeVideo.Active()) {
+            nativeVideo.BoardLine(row, &m_picture[static_cast<size_t>(row) * m_pictureWidth], video.Options(), video.ComparablePicture());
+        }
     }
     m_line = (m_line + 1) % kLines;
+}
+
+// A line for the zoom that leaves the panel where it is (Unpanelled): drawn with the panel's pixels marked, which are
+// noted and the marks taken off (the line as it would have been); and drawn again without the panel's objects and
+// scroll screens
+void Machine::DrawPanelApart(int row, uint32_t *out, const std::function<void(uint32_t *)> &draw) {
+    const size_t at = static_cast<size_t>(row) * m_pictureWidth;
+    video.markObjects = true;
+    video.markLayers = panel.layers;
+    draw(out);
+    video.markObjects = false;
+    video.markLayers = 0;
+    for (int x = 0; x < m_pictureWidth; x++) {
+        m_panelPixels[at + x] = (out[x] & 0x40000000u) ? 1 : 0;
+        out[x] &= 0x00FFFFFFu;
+    }
+    // (the game's own objects hidden stay hidden: theirs or the panel's)
+    static thread_local bool (*gameHides)(uint32_t, uint16_t) = nullptr;
+    static thread_local bool (*panelObject)(uint32_t, uint16_t) = nullptr;
+    gameHides = video.hideObject;
+    panelObject = panel.object;
+    const unsigned layers = video.layerMask;
+    video.hideObject = [](uint32_t tile, uint16_t attributes) {
+        return (gameHides && gameHides(tile, attributes)) || panelObject(tile, attributes);
+    };
+    video.layerMask = layers & ~panel.layers;
+    draw(&m_unpanelled[at]);
+    video.hideObject = gameHides;
+    video.layerMask = layers;
 }
 
 // The Z80 and the QSound chip for a stretch of time. The Z80's cycle count is the sound side's clock: it
@@ -613,6 +710,10 @@ void Machine::WriteRegister(uint32_t address, uint16_t value, uint16_t mask) {
         combine(cpsA[index]);
         if (index == 0x0A / 2) {
             video.CopyPalette(); // (writing the palette's address makes the chip take the palette)
+            if (nativeVideo.checking) {
+                nativeVideo.frame = frame;
+                nativeVideo.BoardPalette(video.DecodePalette());
+            }
             m_palettePending = boardTiming; // (... by DMA, at the next line: LineDma)
         }
         return;
@@ -748,6 +849,10 @@ void Machine::WriteCps1(uint32_t address, uint16_t value, uint16_t mask) {
         combine(cpsA[index]);
         if (index == 0x0A / 2) {
             video.CopyPalette(); // (writing the palette's address makes the chip take the palette)
+            if (nativeVideo.checking) {
+                nativeVideo.frame = frame;
+                nativeVideo.BoardPalette(video.DecodePalette());
+            }
         }
         return;
     }
@@ -781,7 +886,8 @@ void Machine::WriteCps1(uint32_t address, uint16_t value, uint16_t mask) {
         // The classic CPS-1's sound latches: a request (0x800180-0x800187) and the music's volume (0x800188-0x80018F),
         // which its Z80 reads at F008 and F00A
         if (mask & 0x00FF) {
-            m_latch[address >= 0x800188] = static_cast<uint8_t>(value);
+            // (a request: a custom soundtrack may take it, machine/soundtrack.h)
+            m_latch[address >= 0x800188] = address >= 0x800188 ? static_cast<uint8_t>(value) : soundtrack.RequestClassic(static_cast<uint8_t>(value), frame);
             if (m_logClassic) {
                 fprintf(stderr, "68000 latch %d = %02X (frame %llu)\n", address >= 0x800188 ? 2 : 1, value & 0xFF, static_cast<unsigned long long>(frame));
             }
@@ -965,6 +1071,7 @@ void Machine::Serialize(Archive &ar) {
     }
     qsound.Serialize(ar);
     video.Serialize(ar);
+    nativeVideo.Serialize(ar);
     eeprom.Serialize(ar);
     ar.Vec(ram);
     ar.Vec(videoRam);

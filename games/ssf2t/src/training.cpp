@@ -98,7 +98,7 @@ namespace {
         const uint32_t player = Player(n);
         const uint8_t who = Ram8(player + kCharacter);
         fight::MoveLog::Start start;
-        start.character = kAkuma && Ram8(player + kAkuma) ? "Akuma" : who < kCharacters ? kCharacterNames[who] : "?";
+        start.character = IsAkuma(player) ? "Akuma" : who < kCharacters ? kCharacterNames[who] : "?";
         start.input = fight::Notation(PanelHeld(n), Ram8(player + kFacesRight) == 0);
         start.air = Ram8(player + kState) == kJump || Ram8(player + kInAir) != 0;
         start.id = Ram32(player + kFrame); // (the move's first animation frame)
@@ -107,18 +107,13 @@ namespace {
 
     // A box of a record's (a player's or a thrown thing's), placed in the stage as the hit test 0BF5AE places it
     void AddBox(M68K &c, std::vector<fight::StageBox> &boxes, fight::BoxKind kind, uint32_t record, uint32_t box, bool thrown = false) {
-        // (signed bytes, or words: family.h, kBoxWords)
-        auto field = [&](int n) {
-            return kBoxWords ? static_cast<int>(static_cast<int16_t>(c.Read(box + 2 * n, 1)))
-                             : static_cast<int>(static_cast<int8_t>(c.Read(box + n, 0)));
-        };
-        int across = field(0);
-        const int up = field(1);
-        const int halfWidth = field(2), halfHeight = field(3);
+        int across = static_cast<int8_t>(c.Read(box, 0));
+        const int up = static_cast<int8_t>(c.Read(box + 1, 0));
+        const int halfWidth = static_cast<int8_t>(c.Read(box + 2, 0)), halfHeight = static_cast<int8_t>(c.Read(box + 3, 0));
         if (halfWidth <= 0 || halfHeight <= 0) {
             return;
         }
-        if (kLongReach && kind == fight::BoxKind::Attack && (c.Read(box + 5, 0) & 0x80)) {
+        if (kind == fight::BoxKind::Attack && (c.Read(box + 5, 0) & 0x80)) {
             across = -static_cast<int>(c.Read(box + 5, 0)); // (a long reach: 0BF5B6)
         }
         const int x = static_cast<int16_t>(Ram16(record + kX)) + (Ram8(record + kFacesRight) ? -across : across);
@@ -152,11 +147,8 @@ namespace {
             }
             constexpr struct {
                 uint32_t number, table;
-            } kHurt[] = {{kFrameHead, kTableHead}, {kFrameBody, kTableBody}, {kFrameLegs, kTableLegs}, {kFrameFourth, kTableFourth}};
+            } kHurt[] = {{kFrameHead, kTableHead}, {kFrameBody, kTableBody}, {kFrameLegs, kTableLegs}};
             for (const auto &hurt : kHurt) {
-                if (!hurt.number) {
-                    continue; // (no fourth box: family.h)
-                }
                 if (const uint32_t box = BoxOf(c, player, hurt.number, hurt.table, kBoxSize)) {
                     AddBox(c, boxes, fight::BoxKind::Hurt, player, box);
                 }
@@ -183,12 +175,12 @@ namespace {
     void Hud(Machine &machine, std::vector<HudLine> &lines, std::vector<HudBox> &) {
         for (int n = 0; n < 2; n++) {
             const uint32_t player = Player(n);
-            if (FeatureOn("gauge_refill") && Ram8(player + kSuperGauge) < kGaugeFull) {
+            if (family::kTurbo && FeatureOn("gauge_refill") && Ram8(player + kSuperGauge) < kGaugeFull) {
                 SetRam8(player + kSuperGauge, kGaugeFull);
             }
             if (FeatureOn("stun_readout")) {
                 char text[32];
-                const uint32_t most = kStunMost + (Ram8(player + kStunTimes) & 0x1E);
+                const uint32_t most = kStunMost + (family::kTurbo ? Ram8(player + kStunTimes) & 0x1E : 0);
                 snprintf(text, sizeof text, "stun %d/%d", Ram16(player + kStun), machine.Read16(most));
                 lines.push_back({n == 0 ? 0.02f : 0.98f, 0.12f, n == 0 ? -1 : 1, text});
             }
@@ -234,18 +226,24 @@ void RegisterTraining() {
     d.wideStage = WideStage;
     d.wideSide = WideSide;
     d.wideMargin = WideMargin;
+    d.wideEnds = WideEnds;
     d.stageChoices = modes::StageChoices({"The game's choice"});
     d.stageWords = "Where a training session's fight is: the game's own choice or a stage named here. Takes effect when the "
                    "characters are next chosen.";
     d.inputWords = "What each player presses and for how many frames: the stick as a keypad number from the player's side (6 "
                    "forward, 4 back, 2 down), then the buttons.";
     d.hud = Hud;
-    d.ownAids = {"gauge_refill", "stun_readout"};
+    d.ownAids = {"stun_readout"};
     Game &game = TheGame();
-    game.features.push_back({"gauge_refill", modes::kTraining, "Gauge refills", "Both players' super combo gauge kept full."});
+    if (family::kTurbo) { // (Super Street Fighter II has no super combos)
+        d.ownAids.insert(d.ownAids.begin(), "gauge_refill");
+        game.features.push_back({"gauge_refill", modes::kTraining, "Gauge refills", "Both players' super combo gauge kept full."});
+    }
     game.features.push_back({"stun_readout", modes::kTraining, "Stun readout",
-                             "Under each player's bar: the stun built up, against how much stuns the player (it goes away when they "
-                             "are left alone for a while, and takes more each time they have been stunned)."});
+                             family::kTurbo ? "Under each player's bar: the stun built up, against how much stuns the player (it goes away "
+                                              "when they are left alone for a while, and takes more each time they have been stunned)." :
+                                              "Under each player's bar: the stun built up, against how much stuns the player (it goes away "
+                                              "when they are left alone for a while)."});
     session::Register(d);
     AddHook(HookAt(kPlayerStep), "PlayerStep", PlayerStep);
     AddHook(HookAt(kComputerPlayerStep), "ComputerPlayerStep", PlayerStep);

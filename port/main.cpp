@@ -10,10 +10,13 @@
 #include "../runtime/native_z80.h"
 #include "../runtime/state.h"
 #include "hud.h"
+#include "i18n.h"
 #include "../runtime/board.h"
 #include "../fight/battle.h"
+#include "../fight/guest_stages.h"
 #include "png_write.h"
 #include "present.h"
+#include "gpu_picture.h"
 #include "../runtime/spare.h"
 #include "../runtime/guest.h"
 #include "port.h"
@@ -30,6 +33,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <map>
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
@@ -85,6 +89,10 @@ bool Movie::Save(const std::string &path) const {
     fclose(f);
     return true;
 }
+
+namespace {
+    port::GpuPicture *g_gpuPicture = nullptr; // (--video gpu-check)
+} // namespace
 
 namespace {
     constexpr uint32_t kStateVersion = 11; // (5: the 68000's wait kept; 6: the custom soundtrack's place; 7: the board timing's palette copy;
@@ -538,6 +546,13 @@ void RegisterPortFeatures() {
                                   "4:3: as the arcade's monitor showed it. Square pixels: each pixel as wide as it is tall, "
                                   "a little wider than 4:3. Fill: the whole window or screen, stretched to it.",
                                   0, {"4:3", "Square pixels", "Fill"}});
+    // (display_turn: a vertical game only, Turned)
+    if (TheGame().vertical) {
+        TheGame().features.push_back({"display_turn", "Display", "Picture turned",
+                                      "The game was made for a monitor stood on end. Upright: its picture stood up in the window, as "
+                                      "the cabinet showed it. On its side: as the board draws it, for a screen turned on its side.",
+                                      0, {"Upright", "On its side"}});
+    }
     // (display_shader: Port::ShaderPreset, shading.h; the presets are in shaders/ beside the program, kShaderPresets.
     // librashader is in each release, tools/librashader.sh; on Android the presets are unpacked by GameActivity.java)
     TheGame().features.push_back({"display_shader", "Display", "Shader",
@@ -557,9 +572,11 @@ void RegisterPortFeatures() {
         TheGame().features.push_back({"zoom", "Display", "Zoom",
                                       "The picture shown larger about a fighter, following it: player 1's or player 2's (1.5x; the "
                                       "zoom's buttons change the size), or both fighters', as close as keeps them both in the "
-                                      "picture. Also the left stick's click held with a shoulder (with the right stick's: both), "
-                                      "Left Shift with Q, E or W, or a touch screen's Zoom button (both).",
-                                      kFeatureSession, {"Off", "Player 1", "Player 2", "Both fighters"}});
+                                      "picture. Or by distance: a little closer as the fighters come together, out to all of the "
+                                      "picture as they part, with the health bars and clock left as they are. Also the left "
+                                      "stick's click held with a shoulder (with the right stick's: both), Left Shift with Q, E or "
+                                      "W, or a touch screen's Zoom button (both).",
+                                      kFeatureSession, {"Off", "Player 1", "Player 2", "Both fighters", "By distance"}});
     }
     // (online play's readout, each player's own: Port::Shown)
     TheGame().features.push_back({"online_ping", "Online", "Ping",
@@ -587,6 +604,15 @@ void RegisterPortFeatures() {
                                   "During an online match, how many frames each player's own controls are held back, at the bottom "
                                   "of the picture (\"DELAY 2\"): the host chooses it.",
                                   0});
+    // (display_picture: the GPU's picture, --video gpu, unless the CPU's is chosen, --video native; docs/NATIVE_VIDEO.md; read
+    // as the game starts. It was display_gpu, off by default, while the GPU's was a test.)
+    TheGame().features.push_back({"display_picture", "Display", "Picture drawn by",
+                                  "The GPU: the game's picture drawn on the graphics card from what the game's code hands over (its "
+                                  "sprites, its scroll layers and palettes), the same picture pixel for pixel; frames it cannot draw "
+                                  "yet (a shader preset, the modes that put two pictures together) are drawn by the CPU, and so is "
+                                  "everything on a machine whose graphics card cannot be used. The CPU: every frame drawn by the "
+                                  "processor, as before. Takes effect when the game starts.",
+                                  0, {"The GPU", "The CPU"}});
     // (display_vsync: Presenter::SetVsync, issue #185)
     TheGame().features.push_back({"display_vsync", "Display", "VSync",
                                   "Each picture shown when the screen refreshes, so the picture never tears. The game keeps the "
@@ -615,6 +641,20 @@ Scaling DisplayScaling() {
 }
 Shape DisplayShape() {
     return static_cast<Shape>(std::clamp(FeatureValue("display_shape"), 0, 2));
+}
+bool Turned() {
+    return TheGame().vertical && FeatureValue("display_turn") == 0;
+}
+void TurnPicture(const uint32_t *pixels, int across, std::vector<uint32_t> &out) {
+    // (a quarter to the left: the picture's right edge becomes its top)
+    const int rows = Video::kHeight;
+    out.resize(static_cast<size_t>(across) * rows);
+    for (int y = 0; y < rows; y++) {
+        const uint32_t *from = pixels + static_cast<size_t>(y) * across;
+        for (int x = 0; x < across; x++) {
+            out[static_cast<size_t>(across - 1 - x) * rows + y] = from[x];
+        }
+    }
 }
 int WindowSize() {
     static const int kTimes[] = {3, 2, 4, 5, 6};
@@ -736,6 +776,20 @@ bool Port::Init(std::string &error) {
                                     : LoadGuest(guest, folder + "/" + guest.id, guestError) || LoadGuest(guest, folder + "/" + guest.set, guestError);
             if (loaded) {
                 fprintf(stderr, "%s: the set %s too (%s)\n", GAME_NAME, guest.set, guest.name);
+#ifdef GAME_GUEST_VIDEO
+                // (its board's own records: its game's instructions that write the video's registers, watched)
+                struct GuestVideo {
+                    const char *id, *writes;
+                };
+                static const GuestVideo kVideo[] = GAME_GUEST_VIDEO;
+                for (const GuestVideo &v : kVideo) {
+                    Machine *board = cps2recomp::Guest(guest.id);
+                    if (board && std::string(v.id) == guest.id) {
+                        RegisterGuestVideoLifts(guest.id, v.writes, board->cpu.opcodes, board->cpu.romSize);
+                        board->nativeVideo.checkName = std::string("video check, ") + guest.id;
+                    }
+                }
+#endif
             } else {
                 fprintf(stderr, "%s: without %s (%s): %s\n", GAME_NAME, guest.set, guest.name, guestError.c_str());
             }
@@ -744,7 +798,7 @@ bool Port::Init(std::string &error) {
 #endif
     machine = std::make_unique<Machine>(roms);
     machine->cpuSpeed = opt.cpuSpeed > 0 ? opt.cpuSpeed : 1;
-    SetRam(machine->ram.data());
+    SetRam(machine->ram.data(), machine->videoRam.data());
     SetProgram(roms.program.data(), static_cast<uint32_t>(roms.program.size()));
     SetProgramOpcodes(roms.opcodes.data());
 #ifdef GAME_EXTRA_SET
@@ -770,6 +824,10 @@ bool Port::Init(std::string &error) {
     }
     RegisterPortFeatures();
     LoadFeatures(opt.settingsPath, opt.features);
+    // (during an online match, the menu leaves alone what the match decides for both players: Netplay::MatchDecides)
+    menu.matchDecides = [this](size_t feature) {
+        return net && !connecting && feature < TheGame().features.size() && Netplay::MatchDecides(TheGame().features[feature]);
+    };
     // The 68000 and the Z80 are run the same way; each falls back to its interpreter if the build has no
     // translated code for it
     if (opt.cpu.empty()) {
@@ -806,6 +864,118 @@ bool Port::Init(std::string &error) {
     }
     machine->soundCpu.recording = !opt.recordEntries.empty();
     SetRewrites(opt.checkRewrites, opt.noRewrites);
+    // The picture at the game's level (docs/NATIVE_VIDEO.md): the shared rewrites of Capcom's video library
+    if (opt.video == "check" || opt.video == "gpu-check") {
+        machine->nativeVideo.checking = true;
+#ifdef GAME_GUEST_TABLE
+        // (the guests' boards' records checked too)
+        static const GuestGame kCheckedGuests[] = GAME_GUEST_TABLE;
+        for (const GuestGame &guest : kCheckedGuests) {
+            if (Machine *board = cps2recomp::Guest(guest.id)) {
+                board->nativeVideo.checking = true;
+            }
+        }
+#endif
+    }
+    // The machine's picture drawn from the game's side's records, a line at a time, not by video.cpp, unless the board's
+    // is asked for (--video board) or the checks compare the two
+    // (the GPU's picture unless the CPU's is asked for: --video native, cpu or board, or the Display page's choice)
+    if (opt.video == "cpu") {
+        opt.video = "native";
+    }
+    const bool gpu = opt.video == "gpu" || (opt.video.empty() && FeatureValue("display_picture") == 0);
+    if (opt.video == "native" || gpu || opt.video.empty()) {
+        machine->nativeVideo.recording = true;
+        machine->nativeVideo.drawsPicture = true;
+#ifdef GAME_GUEST_TABLE
+        // (the guests' boards' pictures too, from their own records)
+        static const GuestGame kNativeGuests[] = GAME_GUEST_TABLE;
+        for (const GuestGame &guest : kNativeGuests) {
+            if (Machine *board = cps2recomp::Guest(guest.id)) {
+                board->nativeVideo.recording = true;
+                board->nativeVideo.drawsPicture = true;
+            }
+        }
+#endif
+    }
+    if (gpu) {
+        // (the window's picture drawn on the GPU from the native records, the frames the GPU draws: frontend_sdl.cpp)
+        machine->nativeVideo.recording = true;
+        gpuWanted = true;
+        machine->nativeVideo.frameDrawn = [](const NativeVideo::FrameData &frame, void *user) {
+            static_cast<port::GpuPicture *>(user)->Keep(frame);
+        };
+        machine->nativeVideo.frameUser = &gpuPicture;
+        gpuPicture.guestBehind = &machine->guestBehind;
+        gpuPicture.guestShift = &machine->guestShift;
+#ifdef GAME_GUEST_TABLE
+        // (the guests' boards' frames too, for their stages drawn under the game's objects)
+        static const GuestGame kDrawnGuests[] = GAME_GUEST_TABLE;
+        for (const GuestGame &guest : kDrawnGuests) {
+            if (Machine *board = cps2recomp::Guest(guest.id)) {
+                GuestPicture g;
+                g.picture = std::make_unique<GpuPicture>();
+                g.roms = cps2recomp::GuestRoms(guest.id);
+                board->nativeVideo.recording = true;
+                board->nativeVideo.frameDrawn = [](const NativeVideo::FrameData &frame, void *user) {
+                    static_cast<port::GpuPicture *>(user)->Keep(frame);
+                };
+                board->nativeVideo.frameUser = g.picture.get();
+                gpuPicture.AddGuest(g.picture.get());
+                guestPictures.push_back(std::move(g));
+            }
+        }
+#endif
+    }
+    if (!opt.video.empty() && opt.video != "board" && opt.video != "native" && opt.video != "gpu" && opt.video != "check" &&
+        opt.video != "gpu-check") {
+        error = "--video: gpu, native (or cpu), board, check or gpu-check";
+        return false;
+    }
+    RegisterVideoLifts();
+    if (opt.video == "gpu-check") {
+        // (each frame drawn on the GPU as well, on a device of the check's own, no window: port/gpu_picture.h)
+        static port::GpuPicture checkPicture;
+        std::string gpuError;
+        if (!checkPicture.Open(nullptr, roms.graphics.data(), roms.graphics.size(), gpuError) ||
+            (!extraRoms.graphics.empty() && !checkPicture.SetExtraGraphics(extraRoms.graphics.data(), extraRoms.graphics.size(), gpuError))) {
+            error = "--video gpu-check: " + gpuError;
+            return false;
+        }
+        g_gpuPicture = &checkPicture;
+        checkPicture.guestBehind = &machine->guestBehind;
+        checkPicture.guestShift = &machine->guestShift;
+#ifdef GAME_GUEST_TABLE
+        static const GuestGame kCheckedGpuGuests[] = GAME_GUEST_TABLE;
+        for (const GuestGame &guest : kCheckedGpuGuests) {
+            Machine *board = cps2recomp::Guest(guest.id);
+            const RomSet *guestRoms = cps2recomp::GuestRoms(guest.id);
+            if (!board || !guestRoms) {
+                continue;
+            }
+            GuestPicture g;
+            g.picture = std::make_unique<GpuPicture>();
+            g.roms = guestRoms;
+            if (!g.picture->Open(checkPicture.Device(), guestRoms->graphics.data(), guestRoms->graphics.size(), gpuError)) {
+                error = std::string("--video gpu-check: ") + guest.id + ": " + gpuError;
+                return false;
+            }
+            g.picture->checkName = std::string("video gpu-check, ") + guest.id;
+            board->nativeVideo.frameDrawn = [](const NativeVideo::FrameData &frame, void *user) {
+                static_cast<port::GpuPicture *>(user)->Check(frame);
+                static_cast<port::GpuPicture *>(user)->Keep(frame);
+            };
+            board->nativeVideo.frameUser = g.picture.get();
+            checkPicture.AddGuest(g.picture.get());
+            guestPictures.push_back(std::move(g));
+        }
+#endif
+        machine->nativeVideo.frameDrawn = [](const NativeVideo::FrameData &frame, void *user) {
+            static_cast<port::GpuPicture *>(user)->Check(frame);
+            static_cast<port::GpuPicture *>(user)->Keep(frame);
+        };
+        machine->nativeVideo.frameUser = &checkPicture;
+    }
     machine->cpu.watchLow = opt.watchLow;
     machine->cpu.watchHigh = opt.watchHigh;
     machine->cpu.recording = !opt.recordEntries.empty();
@@ -832,7 +1002,8 @@ bool Port::Init(std::string &error) {
     autoState = opt.autoSeed * 0x9E3779B97F4A7C15ull + 0x1234567ull;
     rollbackTest.random = opt.rollbackTest * 0x9E3779B97F4A7C15ull + 0x89ABCDEull;
     if (TheGame().songCount) {
-        machine->soundtrack.FindMusic(roms.soundProgram, TheGame().songTable, TheGame().songCount, TheGame().musicBelow);
+        machine->soundtrack.FindMusic(roms.soundProgram, TheGame().songTable, TheGame().songCount, TheGame().musicBelow,
+                                            TheGame().songAddresses, TheGame().songEntry);
     }
     SoundtrackFollow();
     machine->SetBoardTiming(FeatureOn("arcade_timing"));
@@ -1095,7 +1266,7 @@ void Port::MenuAct(Menu::Action action) {
             menu.Close();
             return;
         }
-        error = "Nothing is kept in slot " + std::to_string(menu.Slot()) + ".";
+        error = recomp::i18n::TrFormat("Nothing is kept in slot {}.", {std::to_string(menu.Slot())});
         break;
     }
     menu.Note(error);
@@ -1144,8 +1315,10 @@ void Port::Key(char key, unsigned n) {
             LeaveOnline();
         }
         break;
-    case 'z': // (tests: the zoom pressed for player n + 1; 2: for both)
-        if (n == Zoom::kBoth) {
+    case 'z': // (tests: the zoom pressed for player n + 1; 2: for both; 3: by distance, the menu's choice)
+        if (n == Zoom::kDistance) {
+            zoom.Choose(4);
+        } else if (n == Zoom::kBoth) {
             zoom.Both();
         } else {
             zoom.Press(static_cast<int>(n));
@@ -1220,7 +1393,7 @@ bool Port::Tick() {
     tick++;
     if (opt.online && !net && !rejoin.empty()) {
         // (joining again: a moment between tries)
-        SetHud({{0.5f, 0.36f, 0, rejoin}, {0.5f, 0.48f, 0, "Joining again in a moment"}, {0.5f, 0.6f, 0, "Esc: quit"}});
+        SetHud({{0.5f, 0.36f, 0, recomp::Tr(rejoin)}, {0.5f, 0.48f, 0, "Joining again in a moment"}, {0.5f, 0.6f, 0, "Esc: quit"}});
         if (tick >= againAt) {
             Again(rejoin);
         }
@@ -1241,7 +1414,7 @@ bool Port::Tick() {
             if (hostedFromMenu) {
                 SetHud({});
                 BackToSolo(false);
-                hostNote = "Stopped hosting: " + error;
+                hostNote = recomp::i18n::TrFormat("Stopped hosting: {}", {recomp::Tr(error)});
                 hostNoteUntil = tick + 300;
                 return false;
             }
@@ -1273,11 +1446,11 @@ bool Port::Tick() {
             static const char *const kDots[] = {"   ", ".  ", ".. ", "..."};
             std::vector<HudLine> lines;
             if (!rejoin.empty()) {
-                lines.push_back({0.5f, 0, 0, rejoin});
+                lines.push_back({0.5f, 0, 0, recomp::Tr(rejoin)});
             }
-            lines.push_back({0.5f, 0, 0, net->waiting + kDots[(tick / 30) % 4]});
+            lines.push_back({0.5f, 0, 0, recomp::Tr(net->waiting) + kDots[(tick / 30) % 4]});
             if (!net->code.empty()) {
-                lines.push_back({0.5f, 0, 0, "Match code " + net->code, 96, 230, 120});
+                lines.push_back({0.5f, 0, 0, recomp::i18n::TrFormat("Match code {}", {net->code}), 96, 230, 120});
                 if (net->Listed()) {
                     lines.push_back({0.5f, 0, 0, "Listed in the lobby"});
                 }
@@ -1368,15 +1541,29 @@ bool Port::Tick() {
     return true;
 }
 
-void Port::Shown(std::vector<uint32_t> &pixels, std::vector<SDL_Rect> *panels) const {
+void Port::Shown(std::vector<uint32_t> &pixels, std::vector<SDL_Rect> *panels, bool over, uint32_t base) const {
     const int across = ShownWidth();
-    pixels.assign(machine->Picture(), machine->Picture() + across * Video::kHeight);
-    DrawHud(pixels.data(), across, Video::kHeight, panels);
+    if (over) {
+        pixels.assign(static_cast<size_t>(across) * Video::kHeight, base);
+    } else {
+        pixels.assign(machine->Picture(), machine->Picture() + across * Video::kHeight);
+    }
+    // (a vertical game's picture turned upright, port::Turned: its boxes drawn on the board's picture, as they belong to the
+    // game's, and the text upright on the picture turned, which is turned back at the end, to be turned again as it is shown)
+    const bool turned = port::Turned();
+    std::vector<uint32_t> upright;
+    if (turned) {
+        DrawHud(pixels.data(), across, Video::kHeight, nullptr, port::kHudBoxes);
+        port::TurnPicture(pixels.data(), across, upright);
+    }
+    uint32_t *const px = turned ? upright.data() : pixels.data();
+    const int W = turned ? +Video::kHeight : across, H = turned ? across : +Video::kHeight;
+    DrawHud(px, W, H, panels, turned ? +port::kHudText : port::kHudBoxes | port::kHudText);
     // A line at the bottom, in the middle (`up` lines higher)
     auto status = [&](const char *text, int up) {
-        const recomp::text::Canvas canvas{pixels.data(), across, Video::kHeight};
+        const recomp::text::Canvas canvas{px, W, H};
         const float width = recomp::text::TextWidth(text, 1);
-        const float x = (across - width) / 2, y = static_cast<float>(Video::kHeight - 11 - up);
+        const float x = (W - width) / 2, y = static_cast<float>(H - 11 - up);
         canvas.Fill(x - 3, y - 2, width + 6, 12, {20, 22, 30, 220});
         canvas.Text(x, y, 1, 0, {255, 255, 255, 255}, text);
         if (panels) {
@@ -1468,10 +1655,10 @@ void Port::Shown(std::vector<uint32_t> &pixels, std::vector<SDL_Rect> *panels) c
         Match()->ReadMatch().phase == MatchView::Phase::Playing;
     if ((net && !connecting) || forkadeNames) {
         const MatchView match = Match()->ReadMatch();
-        const recomp::text::Canvas canvas{pixels.data(), across, Video::kHeight};
+        const recomp::text::Canvas canvas{px, W, H};
         auto under = [&](int side, float y, const std::string &text, recomp::text::Color colour) {
             const float width = recomp::text::TextWidth(text.c_str(), 1);
-            const float x = side == 0 ? 10.0f : across - 10.0f - width;
+            const float x = side == 0 ? 10.0f : W - 10.0f - width;
             canvas.Fill(x - 3, y - 2, width + 6, 12, {20, 22, 30, 220});
             canvas.Text(x, y, 1, 0, colour, text.c_str());
             if (panels) {
@@ -1493,8 +1680,8 @@ void Port::Shown(std::vector<uint32_t> &pixels, std::vector<SDL_Rect> *panels) c
     // The chat: its lines at the left, above the super gauges, the newest lowest, and the line being typed under them
     // (this fork: over either online session, Chat)
     if (Chat()) {
-        const recomp::text::Canvas canvas{pixels.data(), across, Video::kHeight};
-        float y = Video::kHeight - 44.0f;
+        const recomp::text::Canvas canvas{px, W, H};
+        float y = H - 44.0f;
         auto line = [&](const std::string &text, recomp::text::Color colour) {
             const float width = recomp::text::TextWidth(text.c_str(), 1);
             canvas.Fill(7, y - 2, width + 6, 12, {20, 22, 30, 200});
@@ -1528,10 +1715,10 @@ void Port::Shown(std::vector<uint32_t> &pixels, std::vector<SDL_Rect> *panels) c
     }
     // (this fork) Game > Chat history: the match's lines with their times, the newest lowest, as many as fit
     if (historyOpen && !chatHistory.empty()) {
-        const recomp::text::Canvas canvas{pixels.data(), across, Video::kHeight};
+        const recomp::text::Canvas canvas{px, W, H};
         const size_t fit = std::min<size_t>(chatHistory.size(), 14);
         const float top = 20.0f, height = fit * 12.0f + 18.0f;
-        canvas.Fill(6, top, across - 12.0f, height, {20, 22, 30, 225});
+        canvas.Fill(6, top, W - 12.0f, height, {20, 22, 30, 225});
         canvas.Text(12, top + 4, 1, 0, {255, 210, 80, 255}, "CHAT HISTORY (Game > Chat history to close)");
         float y = top + 16;
         for (size_t i = chatHistory.size() - fit; i < chatHistory.size(); i++, y += 12) {
@@ -1541,13 +1728,13 @@ void Port::Shown(std::vector<uint32_t> &pixels, std::vector<SDL_Rect> *panels) c
                         text.c_str());
         }
         if (panels) {
-            panels->push_back({6, static_cast<int>(top), across - 12, static_cast<int>(height)});
+            panels->push_back({6, static_cast<int>(top), W - 12, static_cast<int>(height)});
         }
     }
     // (online: Esc's question, in the middle, over the game, which goes on; the port's own, not the readout, which the
     // game's sources set every frame. --net-arcade's wait: whether to stop hosting, the game stopped meanwhile)
     if (net && leaving) {
-        const recomp::text::Canvas canvas{pixels.data(), across, Video::kHeight};
+        const recomp::text::Canvas canvas{px, W, H};
         const bool hosting = connecting;
         const char *question = hostedFromMenu ? "Leave the match?" : hosting ? "Stop hosting and quit?" : "Leave the match?";
         const char *confirm = hostedFromMenu ? "Confirm (A, Enter): play alone" : hosting ? "Confirm (A, Enter): quit" : "Confirm (A, Enter): leave";
@@ -1557,10 +1744,10 @@ void Port::Shown(std::vector<uint32_t> &pixels, std::vector<SDL_Rect> *panels) c
         } lines[] = {{question, {255, 255, 255, 255}},
                      {confirm, {255, 130, 120, 255}},
                      {"Back (B, Backspace, Esc): stay", {255, 255, 255, 255}}};
-        float y = Video::kHeight / 2.0f - 30;
+        float y = H / 2.0f - 30;
         for (const auto &line : lines) {
             const float width = recomp::text::TextWidth(line.text, 1);
-            const float x = (across - width) / 2;
+            const float x = (W - width) / 2;
             canvas.Fill(x - 6, y - 4, width + 12, 16, {20, 22, 30, 235});
             canvas.Text(x, y, 1, 0, line.colour, line.text);
             if (panels) {
@@ -1572,18 +1759,37 @@ void Port::Shown(std::vector<uint32_t> &pixels, std::vector<SDL_Rect> *panels) c
     // (this fork) The music just switched over (F12): said for a moment, under where fighting games keep their bars
     // and timer
     if (!notice.empty() && tick < noticeUntil) {
-        const recomp::text::Canvas canvas{pixels.data(), across, Video::kHeight};
+        const recomp::text::Canvas canvas{px, W, H};
         const float width = recomp::text::TextWidth(notice.c_str(), 1);
-        const float x = (across - width) / 2, y = 52;
+        const float x = (W - width) / 2, y = 52;
         canvas.Fill(x - 3, y - 2, width + 6, 12, {20, 22, 30, 220});
         canvas.Text(x, y, 1, 0, {255, 255, 255, 255}, notice.c_str());
         if (panels) {
             panels->push_back({static_cast<int>(x) - 3, static_cast<int>(y) - 2, static_cast<int>(width) + 7, 12});
         }
     }
+    if (turned) {
+        // (back as the board draws it: a quarter to the right)
+        for (int y = 0; y < Video::kHeight; y++) {
+            for (int x = 0; x < across; x++) {
+                pixels[static_cast<size_t>(y) * across + x] = upright[static_cast<size_t>(across - 1 - x) * Video::kHeight + y];
+            }
+        }
+    }
 }
 
-bool Port::Windowed(std::vector<uint32_t> &pixels, Zoomed &zoomed) {
+void Port::Readouts(std::vector<uint32_t> &rgba, std::vector<SDL_Rect> *panels) const {
+    std::vector<uint32_t> white;
+    Shown(rgba, panels, true, 0xFF000000u);
+    Shown(white, nullptr, true, 0xFFFFFFFFu);
+    for (size_t n = 0; n < rgba.size(); n++) {
+        // (over black, what is left is the readouts' colour times its alpha; over white, that and what they leave)
+        const uint32_t black = rgba[n], left = (white[n] & 0xFF) - (black & 0xFF);
+        rgba[n] = (black & 0xFFFFFF) | ((255 - std::min<uint32_t>(left, 255)) << 24);
+    }
+}
+
+bool Port::Windowed(std::vector<uint32_t> &pixels, Zoomed &zoomed, bool readouts) {
     const int across = ShownWidth();
     zoom.Follow(across, Video::kHeight);
     const Menu::Rate rate = menu.GameRate();
@@ -1597,13 +1803,42 @@ bool Port::Windowed(std::vector<uint32_t> &pixels, Zoomed &zoomed) {
         shotTicks--;
     }
     zoomed.keep.clear();
+    zoomed.panel = false;
     if (!zoom.View(across, Video::kHeight, zoomed.view)) {
-        Shown(pixels);
+        if (readouts) {
+            Readouts(pixels);
+        } else {
+            Shown(pixels);
+        }
         return false;
+    }
+    if (readouts) {
+        Readouts(pixels, &zoomed.keep);
+        return true;
     }
     // (the game's own picture above, the one with the readout below)
     Shown(pixels, &zoomed.keep);
-    pixels.insert(pixels.begin(), machine->Picture(), machine->Picture() + across * Video::kHeight);
+    const uint32_t *above = machine->Picture();
+    // (not where the game's sources put the picture together from other frames: the last frame run is not the one shown)
+    if (zoom.KeepsPanel() && machine->Unpanelled() && machine->PictureWidth() == across && !cps2recomp::PictureMade()) {
+        // The panel left where it is (zoom.h, by distance): above, the game's picture without it; below, of the one with
+        // the readout, only the panel's pixels and the readout's panels, the rest clear
+        above = machine->Unpanelled();
+        const uint8_t *panel = machine->PanelPixels();
+        std::vector<uint8_t> kept(pixels.size(), 0);
+        for (const SDL_Rect &keep : zoomed.keep) {
+            for (int y = std::max(keep.y, 0); y < std::min(keep.y + keep.h, +Video::kHeight); y++) {
+                for (int x = std::max(keep.x, 0); x < std::min(keep.x + keep.w, across); x++) {
+                    kept[static_cast<size_t>(y) * across + x] = 1;
+                }
+            }
+        }
+        for (size_t n = 0; n < pixels.size(); n++) {
+            pixels[n] = panel[n] || kept[n] ? pixels[n] | 0xFF000000u : 0;
+        }
+        zoomed.panel = true;
+    }
+    pixels.insert(pixels.begin(), above, above + across * Video::kHeight);
     return true;
 }
 
@@ -1614,6 +1849,22 @@ void Port::MenuPicture(std::vector<uint32_t> &pixels, uint32_t &width, uint32_t 
     height = Video::kHeight * 3;
     width = height * 4 / 3 * across / Video::kWidth;
     pixels.resize(static_cast<size_t>(width) * height);
+    if (port::Turned()) {
+        // (the menu stays as it is, over the picture stood up in its middle at its shape, black beside it)
+        std::vector<uint32_t> turned;
+        port::TurnPicture(shown.data(), static_cast<int>(across), turned);
+        const uint32_t tall = height, wide = static_cast<uint32_t>(std::lround(tall * port::PictureShape(Video::kHeight, static_cast<int>(across), port::Shape::Arcade, 1.0f)));
+        const uint32_t left = (width - std::min(wide, width)) / 2;
+        std::fill(pixels.begin(), pixels.end(), 0xFF000000u);
+        for (uint32_t y = 0; y < tall; y++) {
+            const uint32_t *from = &turned[static_cast<size_t>(y * across / tall) * Video::kHeight];
+            uint32_t *to = &pixels[static_cast<size_t>(y) * width + left];
+            for (uint32_t x = 0; x < wide && left + x < width; x++) {
+                to[x] = from[x * Video::kHeight / wide];
+            }
+        }
+        return;
+    }
     for (uint32_t y = 0; y < height; y++) {
         const uint32_t *from = &shown[static_cast<size_t>(y / 3) * across];
         uint32_t *to = &pixels[static_cast<size_t>(y) * width];
@@ -1967,6 +2218,8 @@ void Port::Step(const uint16_t *players) {
     if (TheGame().beforeFrame) {
         TheGame().beforeFrame(*machine);
     }
+    // (the zoom by distance leaves the game's panel where it is: the frame drawn with it apart, zoom.h)
+    machine->panel = zoom.KeepsPanel() ? Machine::Panel{TheGame().panel, TheGame().panelLayers} : Machine::Panel{};
     machine->RunFrame();
     if (opt.musicTest) {
         MusicTest();
@@ -2532,6 +2785,52 @@ void Port::RapidFire() {
     }
 }
 
+// CPS2RECOMP_CALL_LOG=FROM:TO:FILE (with --cpu interp): every jsr and bsr the game's 68000 runs in frames FROM to TO,
+// by where it goes: how often, and from where (for finding a game's routines a frame, docs/NATIVE_VIDEO.md)
+namespace {
+    std::map<uint32_t, std::map<uint32_t, uint64_t>> g_calls;
+    uint64_t g_callFrom = 0, g_callTo = 0;
+    std::string g_callFile;
+    uint32_t g_callTask = 0; // (CPS2RECOMP_CALL_TASK=ADDR: a long of work RAM, the task record running: its number, 1 the first, kept with each)
+    const uint8_t *g_callRam = nullptr;
+    // (CPS2RECOMP_CALL_ORDER=FILE: each call too, in the order made, with its frame)
+    FILE *g_callOrder = nullptr;
+    uint64_t g_callFrame = 0;
+    void LogCall(uint32_t from, uint32_t to) {
+        if (g_callOrder) {
+            fprintf(g_callOrder, "%llu %06X %06X\n", static_cast<unsigned long long>(g_callFrame), from & 0xFFFFFF, to & 0xFFFFFF);
+        }
+        uint32_t task = 0;
+        if (g_callTask && g_callRam) {
+            const uint8_t *p = &g_callRam[g_callTask & 0xFFFF];
+            task = ((static_cast<uint32_t>(p[2] << 8 | p[3]) & 0x1FF) / 0x20 + 1) << 24; // (the record's number, 1 the first)
+        }
+        g_calls[to & 0xFFFFFF][(from & 0xFFFFFF) | task]++;
+    }
+    void WriteCalls() {
+        FILE *out = g_callFile.empty() ? nullptr : fopen(g_callFile.c_str(), "w");
+        if (!out) {
+            return;
+        }
+        for (const auto &[to, froms] : g_calls) {
+            uint64_t all = 0;
+            for (const auto &[from, n] : froms) {
+                all += n;
+            }
+            fprintf(out, "%06X %llu", to, static_cast<unsigned long long>(all));
+            for (const auto &[from, n] : froms) {
+                if (from >> 24) {
+                    fprintf(out, " %06X(task %02X):%llu", from & 0xFFFFFF, from >> 24, static_cast<unsigned long long>(n));
+                } else {
+                    fprintf(out, " %06X:%llu", from, static_cast<unsigned long long>(n));
+                }
+            }
+            fprintf(out, "\n");
+        }
+        fclose(out);
+    }
+}
+
 void Port::GatherInput() {
     if (!opt.moviePlay.empty()) {
         auto it = playMovie.changes.find(frame);
@@ -2597,6 +2896,26 @@ void Port::RunOnlineFrame(const uint16_t players[2], bool again) {
 }
 
 void Port::RunFrame() {
+    if (static const char *log = getenv("CPS2RECOMP_CALL_LOG"); log && g_callFile.empty()) {
+        unsigned long long from = 0, to = 0;
+        char file[1024] = {};
+        if (sscanf(log, "%llu:%llu:%1023s", &from, &to, file) == 3) {
+            g_callFrom = from;
+            g_callTo = to;
+            g_callFile = file;
+        }
+        if (const char *order = getenv("CPS2RECOMP_CALL_ORDER")) {
+            g_callOrder = fopen(order, "w");
+        }
+        if (const char *task = getenv("CPS2RECOMP_CALL_TASK")) {
+            g_callTask = static_cast<uint32_t>(strtoul(task, nullptr, 16));
+            g_callRam = machine->ram.data();
+        }
+    }
+    g_callFrame = frame;
+    if (!g_callFile.empty()) {
+        machine->cpu.callLog = frame >= g_callFrom && frame <= g_callTo ? LogCall : nullptr;
+    }
     ClearSpareRan();
     SoundtrackFollow();
     machine->SetBoardTiming(FeatureOn("arcade_timing"));
@@ -2661,6 +2980,30 @@ void Port::RunFrame() {
         Step(pressed);
     }
     frame++;
+    if (!opt.layerLog.empty()) {
+        // FROM:ADDR:FILE (ADDR in hex, a word of work RAM: the camera's place). For every frame from FROM on, the frame's
+        // number (4 bytes), the word (2), the picture's width (2), then Video::LayerLine for each scroll screen's lines
+        // (tools/stage_ends.py reads it). The probe is set from the start, so the frame just run filled it.
+        static Video::LayerLine probe[3][Video::kHeight];
+        static FILE *file = nullptr;
+        static uint64_t from = 0;
+        static uint32_t word = 0;
+        if (!machine->video.layerProbe) {
+            const size_t colon = opt.layerLog.find(':'), colon2 = opt.layerLog.find(':', colon + 1);
+            from = strtoull(opt.layerLog.c_str(), nullptr, 10);
+            word = static_cast<uint32_t>(strtoul(opt.layerLog.c_str() + colon + 1, nullptr, 16)) & 0xFFFF;
+            file = fopen(opt.layerLog.c_str() + colon2 + 1, "wb");
+            machine->video.layerProbe = probe;
+        } else if (file && frame >= from) {
+            const uint32_t number = static_cast<uint32_t>(frame);
+            const uint16_t head[2] = {static_cast<uint16_t>(machine->ram[word] << 8 | machine->ram[word + 1]),
+                                      static_cast<uint16_t>(machine->video.Width())};
+            fwrite(&number, 4, 1, file);
+            fwrite(head, 2, 2, file);
+            fwrite(probe, sizeof(probe), 1, file);
+            fflush(file);
+        }
+    }
     // (for finding things out: --poke ADDR=BYTE,... every frame; --dump-ram FRAME:file)
     if (!opt.poke.empty()) {
         const char *at = opt.poke.c_str();
@@ -2675,17 +3018,22 @@ void Port::RunFrame() {
         }
     }
     if (!opt.trace.empty()) {
-        // LOW-HIGH:FILE (hex addresses): those bytes of work RAM after every frame, one frame after another
+        // LOW-HIGH:FILE (hex addresses): those bytes of work RAM (or of the video memory, 900000-92FFFF) after every
+        // frame, one frame after another
         static FILE *file = nullptr;
         static uint32_t low = 0, high = 0;
         if (!file) {
             const size_t dash = opt.trace.find('-'), colon = opt.trace.find(':');
-            low = static_cast<uint32_t>(strtoul(opt.trace.c_str(), nullptr, 16)) & 0xFFFF;
-            high = static_cast<uint32_t>(strtoul(opt.trace.c_str() + dash + 1, nullptr, 16)) & 0xFFFF;
+            low = static_cast<uint32_t>(strtoul(opt.trace.c_str(), nullptr, 16)) & 0xFFFFFF;
+            high = static_cast<uint32_t>(strtoul(opt.trace.c_str() + dash + 1, nullptr, 16)) & 0xFFFFFF;
+            if (low < kVideoRamLow || low >= kVideoRamHigh) {
+                low &= 0xFFFF;
+                high &= 0xFFFF;
+            }
             file = fopen(opt.trace.c_str() + colon + 1, "wb");
         }
         if (file && high >= low) {
-            fwrite(&machine->ram[low], 1, high - low + 1, file);
+            fwrite(Ram(low), 1, high - low + 1, file);
             fflush(file);
         }
     }
@@ -2712,12 +3060,21 @@ void Port::RunFrame() {
         memcpy(machine->players, pressed, sizeof(pressed));
         RunAhead();
     }
+    guest_stages::LookFrame(*machine);
     if (opt.shotEvery && frame % opt.shotEvery == 0) {
         char shot[512];
         snprintf(shot, sizeof(shot), "%s%06llu.png", opt.shotPrefix.c_str(), static_cast<unsigned long long>(frame));
         std::vector<uint32_t> shown;
         Shown(shown);
         WritePng(shot, shown.data(), ShownWidth(), Video::kHeight);
+    }
+    // (--video gpu-check: the frame the GPU kept, drawn with the readouts over it, as the window would show it, against
+    // the CPU's picture with the readouts: gpu_picture.h)
+    if (g_gpuPicture && g_gpuPicture->CanDrawKept() && !PictureMade()) {
+        std::vector<uint32_t> readouts, shown;
+        Readouts(readouts);
+        Shown(shown);
+        g_gpuPicture->CheckShown(readouts.data(), shown.data(), ShownWidth());
     }
 }
 
@@ -2751,6 +3108,11 @@ void Port::KeepVolume() const {
 }
 
 void Port::Finish() {
+    WriteCalls();
+    guest_stages::Report(stderr);
+    if (g_callOrder) {
+        fclose(g_callOrder);
+    }
     if (net && !connecting) {
         net->Leave();
         net->Report(true);
@@ -2814,6 +3176,61 @@ void Port::Finish() {
 }
 
 // The list --list-features writes (on Android the launcher asks the game's library for it: port/android.cpp)
+// The language of the menu and the readouts (port/i18n.h): RECOMP_LANGUAGE, which the launcher sets to the one chosen
+// there, else the system's
+void UseLanguage() {
+    AddTranslations();
+    std::vector<std::string> preferred = recomp::i18n::FromEnvironment();
+    int count = 0;
+    if (SDL_Locale **locales = SDL_GetPreferredLocales(&count)) {
+        for (int i = 0; i < count; i++) {
+            preferred.push_back(std::string(locales[i]->language ? locales[i]->language : "") +
+                                (locales[i]->country ? std::string("-") + locales[i]->country : std::string()));
+        }
+        SDL_free(locales);
+    }
+    recomp::i18n::SetLanguage(recomp::i18n::Resolve("", preferred));
+}
+
+// Every text the menu can show of this game (--list-text), a line each (a line break as \n): what a language's table is
+// to have (port/i18n.h)
+std::string MenuTextList() {
+    RegisterGame();
+    RegisterPortFeatures();
+    std::vector<std::string> texts;
+    auto add = [&](const char *text) {
+        if (text && *text && std::find(texts.begin(), texts.end(), text) == texts.end()) {
+            texts.push_back(text);
+        }
+    };
+    const Game &game = TheGame();
+    for (const Feature &f : game.features) {
+        add(f.category);
+        add(f.title);
+        add(f.description);
+        for (const char *choice : f.choices) {
+            add(choice);
+        }
+    }
+    for (const Command &c : game.commands) {
+        add(c.category);
+        add(c.title);
+        add(c.description);
+    }
+    for (const Page &p : game.pages) {
+        add(p.name);
+        add(p.description);
+    }
+    std::string out;
+    for (const std::string &text : texts) {
+        for (const char c : text) {
+            out += c == '\n' ? std::string("\\n") : std::string(1, c);
+        }
+        out += '\n';
+    }
+    return out;
+}
+
 std::string LauncherFeatureList() {
     RegisterGame();
     std::string definitionError;
@@ -2865,10 +3282,18 @@ void Usage() {
             "                         interp (the interpreter, an instruction at a time), check\n"
             "  --sound SIDE           driver (the sound program as ordinary code), z80 (the program itself),\n"
             "                         check (both, every write to the chip compared)\n"
+            "  --video SIDE           gpu (the window's picture drawn on the GPU from the records the game's video\n"
+            "                         code hands over, where it can be: the default, unless the Display page's\n"
+            "                         Picture drawn by says the CPU), native or cpu (drawn from those records on\n"
+            "                         the CPU), board (the picture from the board's registers and memories, the\n"
+            "                         reference), check (the native interface the game's video code hands over\n"
+            "                         compared with the board's, every record: docs/NATIVE_VIDEO.md), gpu-check\n"
+            "                         (that, and each frame drawn on the GPU from it too, read back and compared)\n"
             "  --sound-test SEED[:N]  every N frames (30) a command to the sound side: each song in turn, placed\n"
             "                         some made-up way, and the other commands (with --sound check)\n"
             "  --scale N              window size, times 224 lines (else the Display page's)\n"
-            "  --zoom SIZE:PLAYER     the camera zoomed from the start: SIZE 1-4 (1.25x-2x), PLAYER 1 or 2 (3: both)\n"
+            "  --zoom SIZE:PLAYER     the camera zoomed from the start: SIZE 1-4 (1.25x-2x), PLAYER 1 or 2 (3: both,\n"
+            "                         4: both by their distance, the panel left as it is)\n"
             "  --fullscreen  --window (a window, after --fullscreen)  --mute  --unthrottled\n"
             "  --headless             no window, no sound, as fast as it goes\n"
             "  --frames N             stop after N frames\n"
@@ -2876,6 +3301,9 @@ void Usage() {
             "  --hash-log FILE        a line per frame with a hash of the game's state\n"
             "  --hash-picture         ... of the picture only (to compare runs whose timing is not the same)\n"
             "  --hash-no-picture      ... of all but the picture (--rollback-test then draws only the frames shown)\n"
+            "  --stage-check          other games' stages: their camera checked against where it is wanted, each frame\n"
+            "                         they are shown, and their picture not blank (fight/guest_stages.h)\n"
+            "  --stage-look FILE      the stage viewer's pictures of its stage, for tools/stage_look.py\n"
             "  --hash-no-sound        ... and without the sound side, as online play's (to compare a match's --record)\n"
             "  --hash-game            ... without the Z80 and its own memory (to compare --sound driver and z80)\n"
 "  --renderer sdl|gpu     how the picture gets to the window: SDL's GPU API unless said (or not there)\n"
@@ -2925,11 +3353,12 @@ void Usage() {
             "  --soundtrack DIR       the custom soundtrack's folder (its songs.txt names the files)\n"
             "  --list-songs           the songs the soundtrack's files are named for: name, number, what it is\n"
             "  --soundtrack-dump FILE (with --headless) write what the custom soundtrack plays to a WAV file\n"
-            "  --poke A=B,...         write byte B at RAM address A after every frame (hex)\n"
+            "  --poke A=B,...         write byte B at RAM (or video memory) address A after every frame (hex)\n"
             "  --dump-ram F:FILE      write work RAM after frame F (and FILE.video, .objects, .regs); more than once\n"
             "  --check-rewrites       run every rewritten routine and its original, and report differences\n"
             "  --no-rewrites          run the game's own routines where the sources have rewrites\n"
-            "  --trace LOW-HIGH:FILE  those bytes of work RAM after every frame, appended to FILE\n"
+            "  --trace LOW-HIGH:FILE  those bytes of work RAM (or video memory) after every frame, appended to FILE\n"
+            "  --layer-log F:ADDR:FILE from frame F on, what each scroll screen drew on each line, and the word at ADDR\n"
             "  --watch LOW[-HIGH]     report the 68000's writes to these addresses (hex), with who made them\n"
             "  --keys TICK:KEY,...    keys pressed at those ticks of the screen: p (stop/go), o (a frame on),\n"
             "                         - and = (speed), n and h (a Multi game run's next game, fast forward on/off),\n"
@@ -2969,6 +3398,8 @@ bool ParseArgs(int argc, char **argv, port::Options &o) {
             }
         } else if (a == "--sound") {
             o.sound = next();
+        } else if (a == "--video") {
+            o.video = next();
         } else if (a == "--scale") {
             o.scale = atoi(next());
         } else if (a == "--zoom") {
@@ -3006,6 +3437,10 @@ bool ParseArgs(int argc, char **argv, port::Options &o) {
             o.hashNoSound = true;
         } else if (a == "--hash-no-picture") {
             o.hashNoPicture = true;
+        } else if (a == "--stage-check") {
+            guest_stages::Check(true);
+        } else if (a == "--stage-look") {
+            guest_stages::Look(next());
         } else if (a == "--hash-game") {
             o.hashGame = true;
         } else if (a == "--hash-picture") {
@@ -3162,6 +3597,10 @@ bool ParseArgs(int argc, char **argv, port::Options &o) {
             // session, switched in the game's menu only, are not in it)
             fputs(port::LauncherFeatureList().c_str(), stdout);
             exit(0);
+        } else if (a == "--list-text") {
+            // Every text of the menu's for this game (port/i18n.h): what a language's table is to have
+            fputs(port::MenuTextList().c_str(), stdout);
+            exit(0);
         } else if (a == "--list-songs") {
             // The songs a custom soundtrack's files are named for (the game's own names; no ROM wanted)
             RegisterGame();
@@ -3194,6 +3633,8 @@ bool ParseArgs(int argc, char **argv, port::Options &o) {
             o.noRewrites = true;
         } else if (a == "--trace") {
             o.trace = next();
+        } else if (a == "--layer-log") {
+            o.layerLog = next();
         } else if (a == "--dump-ram") {
             o.dumpRam.push_back(next());
         } else if (a == "--poke") {
@@ -3295,6 +3736,7 @@ int main(int argc, char **argv) {
     }
     recomp::UseSystemProxy();  // (Windows' proxy, for the curl that asks the online service: recomp-common/proxy.h)
 #endif
+    port::UseLanguage();
 #ifdef __ANDROID__
     port::StartOnAndroid();
 #else
@@ -3354,7 +3796,7 @@ int main(int argc, char **argv) {
         return 1;
     }
     if (p.opt.zoom > 0) {
-        p.zoom.Set(p.opt.zoom, std::clamp(p.opt.zoomPlayer, 0, +port::Zoom::kBoth));
+        p.zoom.Set(p.opt.zoom, std::clamp(p.opt.zoomPlayer, 0, +port::Zoom::kDistance));
     }
     int result = 0;
     const auto begin = std::chrono::steady_clock::now();
@@ -3402,16 +3844,25 @@ int main(int argc, char **argv) {
         int musicRate = 0;
         // A picture as the window draws it (--present-test, --present-every): through the GPU path, read back, written
         // to `path`; in a window --present-size big, or one the picture's shape at 3 times its lines
-        auto present = [&](const std::string &path, const std::vector<uint32_t> &shown, const port::Zoomed *zoomed) {
+        auto present = [&](const std::string &path, const std::vector<uint32_t> &board, const port::Zoomed *zoomed) {
             std::vector<uint32_t> drawn;
             std::string error;
-            const int across = p.ShownWidth();
-            const int outHeight = p.opt.presentHeight > 0 ? p.opt.presentHeight : 672;
+            // (a vertical game's picture turned upright, as the window shows it: port::Turned)
+            std::vector<uint32_t> upright;
+            const bool turned = port::Turned();
+            if (turned) {
+                port::TurnPicture(board.data(), p.ShownWidth(), upright);
+                zoomed = nullptr;
+            }
+            const std::vector<uint32_t> &shown = turned ? upright : board;
+            const int across = turned ? +Video::kHeight : p.ShownWidth();
+            const int lines = turned ? p.ShownWidth() : +Video::kHeight;
+            const int outHeight = p.opt.presentHeight > 0 ? p.opt.presentHeight : (turned ? 896 : 672);
             const int outWidth = p.opt.presentWidth > 0 ? p.opt.presentWidth
-                                                        : static_cast<int>(std::lround(outHeight * port::PictureShape(across, Video::kHeight, port::DisplayShape(), 4.0f / 3.0f)));
-            const SDL_FRect where = port::FitPicture(outWidth, outHeight, across, Video::kHeight, port::DisplayShape(), port::DisplayScaling());
+                                                        : static_cast<int>(std::lround(outHeight * port::PictureShape(across, lines, port::DisplayShape(), 4.0f / 3.0f)));
+            const SDL_FRect where = port::FitPicture(outWidth, outHeight, across, lines, port::DisplayShape(), port::DisplayScaling());
             if (SDL_Init(SDL_INIT_VIDEO) &&
-                port::Presenter::Render(shown.data(), across, Video::kHeight, outWidth, outHeight, where, port::DisplayScaling(), drawn, error, zoomed)) {
+                port::Presenter::Render(shown.data(), across, lines, outWidth, outHeight, where, port::DisplayScaling(), drawn, error, zoomed)) {
                 WritePng(path.c_str(), drawn.data(), outWidth, outHeight);
                 return true;
             }
@@ -3501,6 +3952,11 @@ int main(int argc, char **argv) {
             fprintf(stderr, "%llu instructions had no translation and ran in the interpreter (about %.3f%% of the run)\n",
                     static_cast<unsigned long long>(p.machine->cpu.interpreted),
                     100.0 * p.machine->cpu.interpreted * 12.0 / std::max<uint64_t>(1, p.machine->cpu.cycles));
+            if (p.machine->cpu.interpretedRam) {
+                fprintf(stderr, "%llu of them the game's own code in RAM (no translation can have it): %llu of the ROM's\n",
+                        static_cast<unsigned long long>(p.machine->cpu.interpretedRam),
+                        static_cast<unsigned long long>(p.machine->cpu.interpreted - p.machine->cpu.interpretedRam));
+            }
         }
         if (p.machine->soundSide == Machine::SoundSide::Check) {
             fprintf(stderr, "%llu writes to the sound chip the same from the driver and the Z80\n",
@@ -3526,6 +3982,33 @@ int main(int argc, char **argv) {
     }
     if (p.opt.checkRewrites && !ReportRewrites()) {
         return 4;
+    }
+    if (p.machine->nativeVideo.checking && !p.machine->nativeVideo.Report(stderr)) {
+        return 6;
+    }
+#ifdef GAME_GUEST_TABLE
+    {
+        static const GuestGame kReported[] = GAME_GUEST_TABLE;
+        bool same = true;
+        for (const GuestGame &guest : kReported) {
+            if (Machine *board = cps2recomp::Guest(guest.id); board && board->nativeVideo.checking) {
+                same = board->nativeVideo.Report(stderr) && same;
+            }
+        }
+        if (!same) {
+            return 6;
+        }
+    }
+#endif
+    if (port::g_gpuPicture) {
+        // (all reported, the game's and its guests', before any is said to have failed)
+        bool same = port::g_gpuPicture->Report(stderr);
+        for (const auto &g : p.guestPictures) {
+            same = g.picture->Report(stderr) && same;
+        }
+        if (!same) {
+            return 6;
+        }
     }
     return ProgramEnded() >= 0 ? ProgramEnded() : result;
 }

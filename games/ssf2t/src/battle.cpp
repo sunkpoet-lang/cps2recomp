@@ -50,8 +50,8 @@ namespace {
     bool AttackComing(int side) {
         const uint32_t player = Player(side), other = Player(1 - side);
         uint16_t thrown = Ram16(other + 0x1D4);
-        if (!thrown) {
-            thrown = Ram16(other + 0x2AE);
+        if (!thrown && family::kThrownToo) {
+            thrown = Ram16(other + family::kThrownToo);
         }
         if (thrown) {
             const uint32_t record = 0xFF0000 | thrown;
@@ -155,7 +155,7 @@ void RegisterBattle() {
     d.healthFull = kHealthFull;
     d.healthBack = 0x18; // (a sixth of it all)
     d.stages = kStages;
-    d.stageToRound = family::kStageToRound; // (family.h)
+    d.stageToRound = 2000; // (about 1,700 from switching on, and a few)
     d.characterSpan = kCharacters;
     d.choosable = [](int) { return true; };
     d.rosterNumber = [](int choice) { return choice >= 1 && choice <= kCharacters ? choice - 1 : -1; };
@@ -173,6 +173,7 @@ void RegisterBattle() {
     d.stageViewer = modes::StageViewer;
     d.wideSide = WideSide;
     d.wideMargin = WideMargin;
+    d.wideEnds = WideEnds;
     d.notTheStage = NotTheStage;
     d.thePanel = ThePanel;
     d.notTheFighters = NotTheFighters;
@@ -197,8 +198,8 @@ void RegisterBattle() {
     d.speedY = kSpeedY;
     d.speedWords = true;
     d.floor = kGround;
-    d.meter = kSuperGauge; // (the super combo gauge, which the setting up leaves as it was)
-    d.meterSize = 1;
+    d.meter = family::kTurbo ? kSuperGauge : 0; // (the super combo gauge, which the setting up leaves as it was)
+    d.meterSize = family::kTurbo ? 1 : 0;
     battle::Register(d);
     battle::RegisterTeamTag(0.25f);
 }

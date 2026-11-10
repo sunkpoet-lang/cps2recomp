@@ -24,6 +24,7 @@
 #include "soundtrack.h"
 
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
 #include <type_traits>
@@ -76,6 +77,9 @@ public:
             video.SetExtraGraphics(extra->graphics.data(), extra->graphics.size());
             scrollFromExtra.assign(videoRam.size() / 4, 0);
             video.SetScrollFromExtra(scrollFromExtra.data());
+            nativeVideo.SetExtraGraphics(extra->graphics.data(), extra->graphics.size());
+            nativeVideo.objectsFromExtra = objectsFromExtra;
+            nativeVideo.scrollFromExtra = scrollFromExtra.data();
         }
         // (its sound side too, where it has one: machine/sound_board.h)
         extraSound.reset();
@@ -112,6 +116,21 @@ public:
     // picture the frame made, to change before it is shown
     uint32_t *Picture() {
         return m_picture.data();
+    }
+    // For the port's zoom that leaves the game's panel (its bars and clock) where it is (port/zoom.h): while `panel.object`
+    // is given (the panel's objects, as Game::panel tells them; and `panel.layers`, its scroll screens), each line is
+    // drawn a second time without the panel. Of the frame then, the picture without it, and which pixels of its own
+    // picture are the panel's (1); nullptr when the frame was not drawn so (not asked, or the game's sources were putting
+    // a picture together of their own with its marks: Video::markObjects). Not part of a save state.
+    struct Panel {
+        bool (*object)(uint32_t tile, uint16_t attributes) = nullptr;
+        unsigned layers = 0;
+    } panel;
+    const uint32_t *Unpanelled() const {
+        return m_panelDrawn ? m_unpanelled.data() : nullptr;
+    }
+    const uint8_t *PanelPixels() const {
+        return m_panelDrawn ? m_panelPixels.data() : nullptr;
     }
     // Sound made and not yet taken: left and right samples at QSound::kSampleRate
     std::vector<int16_t> audio;
@@ -165,6 +184,16 @@ public:
     Z80 soundCpu;
     QSound qsound;
     Video video;
+    NativeVideo nativeVideo; // (the picture at the game's level: video/native.h; --video check compares it)
+    // (the frame's picture was put together over a guest board's: fight/guest_stages.cpp; the GPU's picture follows it)
+    bool guestBehind = false;
+    // (... and the guest's picture moved down this many lines under it: its camera not as high as the game's, or lower;
+    // its top or bottom line repeated where it moved off)
+    int guestShift = 0;
+    // Whether the machine draws its own picture's lines (false: only the native records are kept, a frame at a time, for
+    // another machine to draw it from them, NativeVideo::LastFrame and DrawFrame: a guest board's stage, drawn by the
+    // game showing it; still drawn while the records are checked against it)
+    bool ownPicture = true;
     Eeprom eeprom;
 
     // Memory, as bytes in the 68000's order
@@ -211,6 +240,7 @@ public:
     }
 
 private:
+    GfxTable m_gfxTable; // (Board::gfxMap as a table: MakeGfxTable)
     const RomSet &m_roms;
     const RomSet *m_extra = nullptr;
     uint32_t m_extraBase = 0;
@@ -229,6 +259,9 @@ private:
         if (!scrollFromExtra.empty() && (address & 2) == 0) { // (a map entry's tile word)
             scrollFromExtra[(address - 0x900000) / 4] = m_readExtraEver && cpu.cycles - m_readExtraAt < kExtraReadNear;
         }
+        if (nativeVideo.Active()) {
+            nativeVideo.VideoWritten(address); // (with the mark just made)
+        }
     }
     void ObjectWritten(int bank, uint32_t address) {
         if (m_extra && (address & 6) == 0) { // (an entry's first word)
@@ -237,6 +270,10 @@ private:
         }
     }
     std::vector<uint32_t> m_picture;
+    std::vector<uint32_t> m_unpanelled; // (Unpanelled, PanelPixels)
+    std::vector<uint8_t> m_panelPixels;
+    bool m_panelDrawing = false, m_panelDrawn = false;
+    bool (*m_panelMarks)(uint32_t, uint16_t) = nullptr; // (Video::panelObject as set for it)
     int m_pictureWidth = Video::kWidth;
     int m_line = 0;
     uint64_t m_lineStart = 0;  // the CPU's cycle count at which the next line starts
@@ -262,6 +299,7 @@ private:
     void WriteClassic(uint16_t address, uint8_t value);
 
     void RunLine();
+    void DrawPanelApart(int row, uint32_t *out, const std::function<void(uint32_t *)> &draw);
     int LineCycles() const;
     const bool m_cps1;          // (RomSet::board)
     const int m_cyclesPerLine;  // the 68000's
