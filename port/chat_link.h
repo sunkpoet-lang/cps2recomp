@@ -27,6 +27,21 @@ public:
     virtual bool ChatReady() const = 0;
     virtual bool ChatOver() const = 0;
     virtual std::vector<std::string> ChatUndelivered() const = 0;
+
+    // (this fork: spectators, openspec change match-spectators) the lines that came, each with who said it ("" for
+    // the other player, by ChatName) and whether a spectator did; and whether this side watches
+    struct Heard {
+        std::string name, text;
+        bool spectator = false;
+    };
+    virtual std::vector<Heard> ChatHeardLines() {
+        std::vector<Heard> lines;
+        for (std::string &text : ChatHeard()) {
+            lines.push_back({"", std::move(text), false});
+        }
+        return lines;
+    }
+    virtual bool ChatSpectating() const { return false; }
 };
 
 } // namespace port

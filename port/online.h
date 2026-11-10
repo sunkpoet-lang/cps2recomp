@@ -104,6 +104,8 @@ public:
     bool ChatReady() const override;
     bool ChatOver() const override;
     std::vector<std::string> ChatUndelivered() const override;
+    std::vector<Heard> ChatHeardLines() override;
+    bool ChatSpectating() const override { return Spectating(); }
 
     // (the adapter's, for GekkoNet's callbacks)
     struct Socket;
@@ -114,6 +116,8 @@ public:
 
 private:
     std::string Mismatch(const std::vector<uint8_t> &said, bool recoveryCompatible) const;
+    void PumpChat();
+    void RelayLine(int role, const std::string &name, const std::string &text, const std::string &except);
     std::vector<uint8_t> HelloOut() const;
     void SendStatus(int phase);
     void ApplyStatus();
@@ -166,8 +170,13 @@ private:
     struct Spectator {
         std::string name, nick;
         int handle = -1;
+        std::shared_ptr<recomp::chat::Channel> own; // (its lines to the host, C and A)
+        std::shared_ptr<class ChatRelay> relay;     // (the others' lines to it, V and U)
     };
     std::vector<Spectator> m_spectators;
+    // (this fork: spectators' chat) the host's relay to the other player; the other player's and a spectator's from
+    // the host
+    std::shared_ptr<class ChatRelay> m_relay;
     // (this fork: spectators) what the host's last status said: its phase (0 waiting for a challenger, 1 connecting,
     // 2 playing, 3 reconnecting, 4 ended), how many watch, and the players' names
     int m_hostPhase = -1, m_seenWatching = 0;

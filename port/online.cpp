@@ -24,7 +24,9 @@
 #include <charconv>
 #include <random>
 #include <deque>
+#include <functional>
 #include <map>
+#include <tuple>
 
 #ifdef _WIN32
 #include <winsock2.h>
@@ -93,7 +95,8 @@ namespace {
         std::vector<std::string> list;
         for (const cps2recomp::Feature &feature : TheGame().features) {
             const bool own = !strcmp(feature.category, "Display") && strncmp(feature.name, "widescreen", 10) != 0;
-            if (own || cps2recomp::OnlineOff(feature.name)) {
+            // ((this fork) Mute spectators: what each player sees, never part of the match)
+            if (own || cps2recomp::OnlineOff(feature.name) || !strcmp(feature.name, "online_mute_spectators")) {
                 continue;
             }
             list.push_back(std::string(feature.name) + "=" + std::to_string(matchFlow && !strcmp(feature.name,"online_hide_names") ? 0 : cps2recomp::FeatureSetting(feature.name)));
@@ -134,6 +137,100 @@ namespace {
     }
 } // namespace
 
+// --- (this fork) the spectators' chat relay ---
+//
+// The players' own chat (C and A) is unchanged. With spectators, the host relays every line to whoever did not say
+// it, on a channel of its own to each of the others: V, a line with who said it (its number, little-endian like the
+// chat's; the role, 0 the host, 1 the other player, 2 a spectator; the name's length and the name; the text's length,
+// two bytes, and the text), and U, how many have come (the chat's A). Lines are resent every quarter second until
+// acknowledged, and delivered once and in order (docs/chat-protocol.md, Spectators).
+class ChatRelay {
+public:
+    using Send = std::function<void(char kind, const std::vector<uint8_t> &payload)>;
+    struct Line {
+        int role = 0;
+        std::string name, text;
+    };
+    explicit ChatRelay(Send send) : m_send(std::move(send)) {}
+
+    void Push(const Line &line, uint64_t now) {
+        std::vector<uint8_t> payload(4);
+        const uint32_t number = m_next++;
+        for (int i = 0; i < 4; i++) {
+            payload[i] = static_cast<uint8_t>(number >> (8 * i));
+        }
+        const std::string name = line.name.substr(0, 255);
+        payload.push_back(static_cast<uint8_t>(line.role));
+        payload.push_back(static_cast<uint8_t>(name.size()));
+        payload.insert(payload.end(), name.begin(), name.end());
+        const std::string text = line.text.substr(0, 4096);
+        payload.push_back(static_cast<uint8_t>(text.size()));
+        payload.push_back(static_cast<uint8_t>(text.size() >> 8));
+        payload.insert(payload.end(), text.begin(), text.end());
+        m_out.emplace_back(number, std::move(payload));
+        m_send('V', m_out.back().second);
+        m_sentAt = now;
+    }
+    void Receive(char kind, const uint8_t *data, size_t size, uint64_t now) {
+        (void)now;
+        if (kind == 'U') {
+            uint32_t count = 0;
+            if (!recomp::chat::DecodeAck(data, size, count)) {
+                return;
+            }
+            while (!m_out.empty() && m_out.front().first < count) {
+                m_out.pop_front();
+            }
+            return;
+        }
+        if (kind != 'V' || size < 8) {
+            return;
+        }
+        const uint32_t number = data[0] | data[1] << 8 | data[2] << 16 | static_cast<uint32_t>(data[3]) << 24;
+        const int role = data[4];
+        const size_t nameSize = data[5];
+        if (6 + nameSize + 2 > size) {
+            return;
+        }
+        const size_t textSize = data[6 + nameSize] | data[7 + nameSize] << 8;
+        if (8 + nameSize + textSize > size) {
+            return;
+        }
+        if (number == m_heardUpTo) {
+            Line line;
+            line.role = role;
+            recomp::chat::Clean(std::string(reinterpret_cast<const char *>(data + 6), nameSize), recomp::chat::kNameMost, line.name);
+            recomp::chat::Clean(std::string(reinterpret_cast<const char *>(data + 8 + nameSize), textSize), recomp::chat::kLineMost,
+                                line.text);
+            if (!line.text.empty()) {
+                m_heard.push_back(std::move(line));
+            }
+            m_heardUpTo++;
+        }
+        m_send('U', recomp::chat::EncodeAck(m_heardUpTo));
+    }
+    void Pump(uint64_t now) {
+        if (!m_out.empty() && now - m_sentAt >= recomp::chat::kResendMs) {
+            for (const auto &[number, payload] : m_out) {
+                m_send('V', payload);
+            }
+            m_sentAt = now;
+        }
+    }
+    std::vector<Line> Take() {
+        std::vector<Line> lines;
+        lines.swap(m_heard);
+        return lines;
+    }
+
+private:
+    Send m_send;
+    std::deque<std::pair<uint32_t, std::vector<uint8_t>>> m_out;
+    uint32_t m_next = 0, m_heardUpTo = 0;
+    uint64_t m_sentAt = 0;
+    std::vector<Line> m_heard;
+};
+
 // --- the socket, and GekkoNet's adapter on it ---
 
 #ifdef _WIN32
@@ -166,6 +263,16 @@ struct Online::Socket {
     std::vector<uint8_t> status;                   // (the host's last Q, as the others got it)
     uint64_t statusMs = 0;
     uint64_t sentToPeer = 0, sentToWatchers = 0, packetsToWatchers = 0; // (bytes sent, for the measurements)
+    // (this fork: spectators' chat) the relay's V and U from the host; at the host, each spectator's C, A and U
+    std::vector<std::pair<char, std::vector<uint8_t>>> forRelay;
+    std::vector<std::tuple<std::string, char, std::vector<uint8_t>>> fromWatchers;
+    // (--chat-loss: the chat's packets dropped at random as sent, as a bad network would)
+    int chatLoss = 0;
+    uint32_t lossSeed = 12345;
+    bool ChatLost() {
+        lossSeed = lossSeed * 1103515245u + 12345u;
+        return static_cast<int>((lossSeed >> 16) % 100) < chatLoss;
+    }
 
     const std::string *WatcherName(const sockaddr_in &from) const {
         for (const auto &[at, name] : watchers) {
@@ -297,16 +404,18 @@ struct Online::Socket {
             if(kind=='Q'){if(!host && havePeer && Same(from,peer) && got>=24){status.assign(buffer+4,buffer+got);statusMs=NowMs();}continue;}
             // (a spectator's GekkoNet packets, to the host, with the room and epoch when the match has them: nothing
             // else of theirs is taken)
-            if(host && kind=='G') {
+            if(host && (kind=='G' || kind=='C' || kind=='A' || kind=='U')) {
                 if(const std::string* name=WatcherName(from)) {
                     const uint8_t* bytes=buffer+4;size_t count=static_cast<size_t>(got-4);
-                    if(recovery) {
+                    if(recovery && kind!='U') {
                         if(count<16 || !room || Recovery::Get(bytes)!=room)continue;
                         if(Recovery::Get(bytes+8)!=epoch){++stalePackets;continue;}
                         bytes+=16;count-=16;
                     }
                     watcherHeard[*name]=NowMs();
-                    forGekko.emplace_back(bytes,bytes+count);forGekkoFrom.push_back(*name);continue;
+                    if(kind=='G'){forGekko.emplace_back(bytes,bytes+count);forGekkoFrom.push_back(*name);}
+                    else if(fromWatchers.size()<256)fromWatchers.emplace_back(*name,kind,std::vector<uint8_t>(bytes,bytes+count));
+                    continue;
                 }
             }
             if(!havePeer || !Same(from,peer))continue;
@@ -314,6 +423,7 @@ struct Online::Socket {
                 if(controls.size()<64)controls.emplace_back(kind,std::vector<uint8_t>(buffer+4,buffer+got));
                 continue;
             }
+            if(kind=='V' || kind=='U'){if(forRelay.size()<256)forRelay.emplace_back(kind,std::vector<uint8_t>(buffer+4,buffer+got));continue;}
             if(kind!='G' && kind!='C' && kind!='A')continue;
             const uint8_t* payload=buffer+4;size_t size=static_cast<size_t>(got-4);
             if(recovery) {
@@ -513,10 +623,15 @@ bool Online::Start(Port &port, const OnlineOptions &options, std::string &error)
     m_socket = new Socket;
     // (this fork) The in-game chat, on the session's socket
     Socket *socket = m_socket;
-    m_chat = std::make_unique<recomp::chat::Channel>([socket, loss = options.chatLoss, seed = uint32_t{12345}](
-                                                         char kind, const std::vector<uint8_t> &payload) mutable {
-        seed = seed * 1103515245u + 12345u; // (--chat-loss: dropped at random, as a bad network would)
-        if (socket->havePeer && static_cast<int>((seed >> 16) % 100) >= loss) {
+    socket->chatLoss = options.chatLoss;
+    m_chat = std::make_unique<recomp::chat::Channel>([socket](char kind, const std::vector<uint8_t> &payload) {
+        if (socket->havePeer && !socket->ChatLost()) {
+            socket->Send(kind, payload.data(), payload.size(), socket->peer);
+        }
+    });
+    // (this fork: spectators' chat) the host's relay to the other player, or this side's from the host
+    m_relay = std::make_shared<ChatRelay>([socket](char kind, const std::vector<uint8_t> &payload) {
+        if (socket->havePeer && !socket->ChatLost()) {
             socket->Send(kind, payload.data(), payload.size(), socket->peer);
         }
     });
@@ -714,6 +829,14 @@ void Online::WatchHellos() {
                 if(taken)number++;
             }
             Spectator one;one.name="spec"+std::to_string(number);one.nick=name;
+            // (its chat: its lines to the host, and the others' relayed to it)
+            Socket* socket=m_socket;const std::string to=one.name;
+            auto send=[socket,to](char kind,const std::vector<uint8_t>& payload) {
+                if(socket->ChatLost())return;
+                if(const sockaddr_in* at=socket->WatcherAt(to.data(),to.size()))socket->Send(kind,payload.data(),payload.size(),*at);
+            };
+            one.own=std::make_shared<recomp::chat::Channel>(send);
+            one.relay=std::make_shared<ChatRelay>(send);
             m_spectators.push_back(one);m_socket->watchers.emplace_back(from,one.name);
             fprintf(stderr,"online: spectator %s (%s) said hello\n",one.name.c_str(),name.c_str());
         }
@@ -912,6 +1035,26 @@ void Online::Pump() {
         }
     }
     m_socket->forChat.clear();
+    // (this fork: spectators' chat) the relay's packets from the host; at the host, each spectator's
+    for (const auto &[kind, payload] : m_socket->forRelay) {
+        if (m_heard && m_relay) {
+            m_relay->Receive(kind, payload.data(), payload.size(), NowMs());
+        }
+    }
+    m_socket->forRelay.clear();
+    for (const auto &[name, kind, payload] : m_socket->fromWatchers) {
+        for (Spectator &one : m_spectators) {
+            if (one.name != name) {
+                continue;
+            }
+            if (kind == 'U') {
+                one.relay->Receive(kind, payload.data(), payload.size(), NowMs());
+            } else {
+                one.own->Receive(kind, payload.data(), payload.size(), NowMs());
+            }
+        }
+    }
+    m_socket->fromWatchers.clear();
 }
 
 void Online::PublishFlow() {
@@ -999,6 +1142,7 @@ int Online::Tick(const uint16_t local[2], bool advanceWaiting) {
             End("The connection to the match was lost", false);
             return 0;
         }
+        PumpChat();
         if (!m_session) {
             return 0;
         }
@@ -1028,9 +1172,7 @@ int Online::Tick(const uint16_t local[2], bool advanceWaiting) {
         if(m_status==Status::Ended || m_recovery.Waiting() || Epoch()!=inputEpoch)return 0;
     }
     gekko_network_poll(m_session);
-    if (m_chat) {
-        m_chat->Pump(NowMs()); // (this fork: the chat's lines not acknowledged yet, again)
-    }
+    PumpChat(); // (this fork: the chat's lines not acknowledged yet, again)
     gekko_add_local_input(m_session, m_local, &mine);
     Run();
     if(m_status==Status::Recovering)PrepareRecovery();
@@ -1203,14 +1345,77 @@ std::string Online::Stats() const {
 ChatLink::Said Online::ChatSay(const std::string &text, std::string &line) {
     if(m_options.matchFlow && Recovering())return Said::Wait;
     switch (m_chat ? m_chat->Say(text, NowMs(), &line) : recomp::chat::Channel::Said::Empty) {
-    case recomp::chat::Channel::Said::Sent: return Said::Sent;
+    case recomp::chat::Channel::Said::Sent:
+        if (ChatHost()) {
+            RelayLine(0, ChatName(0), line, ""); // (this fork: the host's line to the spectators too)
+        }
+        return Said::Sent;
     case recomp::chat::Channel::Said::Wait: return Said::Wait;
     default: return Said::Empty;
     }
 }
 
 std::vector<std::string> Online::ChatHeard() {
-    return m_chat ? m_chat->TakeHeard() : std::vector<std::string>{};
+    std::vector<std::string> lines;
+    for (Heard &one : ChatHeardLines()) {
+        lines.push_back(std::move(one.text));
+    }
+    return lines;
+}
+
+// (this fork: spectators' chat) Every line heard, with who said it; the host relays each to whoever did not say it
+std::vector<ChatLink::Heard> Online::ChatHeardLines() {
+    std::vector<Heard> lines;
+    if (m_chat) {
+        for (std::string &text : m_chat->TakeHeard()) {
+            if (ChatHost()) {
+                RelayLine(1, ChatName(1), text, "");
+            }
+            lines.push_back({"", std::move(text), false});
+        }
+    }
+    if (ChatHost()) {
+        for (Spectator &one : m_spectators) {
+            for (std::string &text : one.own->TakeHeard()) {
+                const std::string name = one.nick.empty() ? "Spectator" : one.nick;
+                RelayLine(2, name, text, one.name);
+                lines.push_back({name, std::move(text), true});
+            }
+        }
+    } else if (m_relay) {
+        for (ChatRelay::Line &one : m_relay->Take()) {
+            lines.push_back({one.name.empty() ? (one.role == 2 ? "Spectator" : one.role == 0 ? "Player 1" : "Player 2") : one.name,
+                             std::move(one.text), one.role == 2});
+        }
+    }
+    return lines;
+}
+
+// (the host's) a line to the other player (unless it said it: role 1) and to every spectator but `except`
+void Online::RelayLine(int role, const std::string &name, const std::string &text, const std::string &except) {
+    const uint64_t now = NowMs();
+    if (role == 2 && m_relay && m_heard) {
+        m_relay->Push({role, name, text}, now);
+    }
+    for (Spectator &one : m_spectators) {
+        if (one.name != except && one.relay) {
+            one.relay->Push({role, name, text}, now);
+        }
+    }
+}
+
+void Online::PumpChat() {
+    const uint64_t now = NowMs();
+    if (m_chat) {
+        m_chat->Pump(now);
+    }
+    if (m_relay) {
+        m_relay->Pump(now);
+    }
+    for (Spectator &one : m_spectators) {
+        one.own->Pump(now);
+        one.relay->Pump(now);
+    }
 }
 
 std::string Online::ChatName(int player) const {
@@ -1226,8 +1431,7 @@ bool Online::ChatHost() const {
 }
 
 bool Online::ChatReady() const {
-    // (this fork: spectators chat in a later stage of match-spectators)
-    return m_chat && m_heard && m_status == Status::Playing && !Spectating();
+    return m_chat && m_heard && m_status == Status::Playing;
 }
 
 bool Online::ChatOver() const {
