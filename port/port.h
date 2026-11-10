@@ -257,6 +257,9 @@ struct Port {
     // under the life bars from two on. Each player's machine counts the same, both running the same game.
     bool otherIn = false;
     int streak[2] = {}, roundsWon[2] = {};
+    // (this fork, online-hud) Tab online: the top strip of names and streaks and the connection rows hidden, for the
+    // session (the frontend sets it, and clears it when the session ends)
+    bool onlineOverlayHidden = false;
     bool roundCounted = false;
     int roundQuiet = 0;
     void Streaks();     // (this side's player has pressed Start in the match: "PRESS START TO JOIN" is said until then)

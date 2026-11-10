@@ -1650,30 +1650,60 @@ void Port::Shown(std::vector<uint32_t> &pixels, std::vector<SDL_Rect> *panels, b
     if (shotTicks > 0) {
         status(shotSaid.c_str(), said * 14);
     }
-    // (online: each player's name under their side's life bar, and under it a win streak of two or more)
+    // (online, this fork's online-hud: the players' names and win streaks in one strip at the top, over the score row
+    // and above the life bars and the timer, see-through as Fightcade's: "Name1  N  VS  M  Name2", the streaks in the
+    // fighting games only; Tab hides it)
     const bool forkadeNames = gekkoOnline && (opt.gekko.matchFlow || opt.gekko.mode == OnlineOptions::Mode::Watch) && Match() &&
         Match()->ReadMatch().phase == MatchView::Phase::Playing;
-    if ((net && !connecting) || forkadeNames) {
+    if (((net && !connecting) || forkadeNames) && !onlineOverlayHidden) {
         const MatchView match = Match()->ReadMatch();
         const recomp::text::Canvas canvas{px, W, H};
-        auto under = [&](int side, float y, const std::string &text, recomp::text::Color colour) {
-            const float width = recomp::text::TextWidth(text.c_str(), 1);
-            const float x = side == 0 ? 10.0f : W - 10.0f - width;
-            canvas.Fill(x - 3, y - 2, width + 6, 12, {20, 22, 30, 220});
-            canvas.Text(x, y, 1, 0, colour, text.c_str());
-            if (panels) {
-                panels->push_back({static_cast<int>(x) - 3, static_cast<int>(y) - 2, static_cast<int>(width) + 7, 12});
+        // (12 letters at most: UTF-8's continuation bytes are not letters)
+        auto cut = [](const std::string &name) {
+            size_t letters = 0, at = 0;
+            for (; at < name.size(); at++) {
+                if ((static_cast<unsigned char>(name[at]) & 0xC0) != 0x80 && letters++ == 12) {
+                    break;
+                }
             }
+            return name.substr(0, at);
         };
-        for (int side = 0; side < 2; side++) {
-            float y = 38.0f;
-            const std::string &name = match.names[side];
-            if (!FeatureOn("online_hide_names") && !name.empty()) {
-                under(side, y, name, {255, 255, 255, 255});
-                y += 12;
+        struct Part {
+            std::string text;
+            recomp::text::Color colour;
+        };
+        // (online-hud-palette: player 1 blue, player 2 red, the numbers white, VS grey, on the see-through band)
+        using recomp::text::Palette;
+        const bool names = !FeatureOn("online_hide_names"), streaks = battle::RoundResultNow() >= 0;
+        std::vector<Part> parts;
+        if (names && !match.names[0].empty()) {
+            parts.push_back({cut(match.names[0]), Palette::kPlayer1});
+        }
+        if (streaks) {
+            parts.push_back({std::to_string(streak[0]), Palette::kNumber});
+        }
+        parts.push_back({"VS", Palette::kVersus});
+        if (streaks) {
+            parts.push_back({std::to_string(streak[1]), Palette::kNumber});
+        }
+        if (names && !match.names[1].empty()) {
+            parts.push_back({cut(match.names[1]), Palette::kPlayer2});
+        }
+        if (parts.size() > 1) {
+            const float gap = recomp::text::TextWidth("  ", 1);
+            float width = -gap;
+            for (const Part &part : parts) {
+                width += recomp::text::TextWidth(part.text.c_str(), 1) + gap;
             }
-            if (streak[side] >= 2) {
-                under(side, y, "STREAK " + std::to_string(streak[side]), {255, 210, 80, 255});
+            float x = std::floor((W - width) / 2);
+            // (rows 0-9; the connection's second row is under it, from row 10: frontend_sdl.cpp)
+            canvas.Fill(x - 4, 0, width + 8, 10, Palette::kBand);
+            if (panels) {
+                panels->push_back({static_cast<int>(x) - 4, 0, static_cast<int>(width) + 9, 10});
+            }
+            for (const Part &part : parts) {
+                canvas.Text(x, 1, 1, 0, part.colour, part.text.c_str());
+                x += recomp::text::TextWidth(part.text.c_str(), 1) + gap;
             }
         }
     }
