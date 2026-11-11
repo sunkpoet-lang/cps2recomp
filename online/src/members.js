@@ -390,7 +390,8 @@ export async function membershipFetch(request, env, url, parts, text) {
   if (request.method === "GET" && route === "auth/discord/start") {
     const wanted = (url.searchParams.get("for") || "web").slice(0, 64);
     const { body: made } = await ask("/state/new", { for: wanted });
-    const go = new URL("https://discord.com/oauth2/authorize");
+    // (DISCORD_AUTHORIZE_URL: a local stand-in's, for the dev server; Discord's otherwise)
+    const go = new URL(env.DISCORD_AUTHORIZE_URL || "https://discord.com/oauth2/authorize");
     go.searchParams.set("client_id", env.DISCORD_CLIENT_ID || "");
     go.searchParams.set("response_type", "code");
     go.searchParams.set("scope", "identify");
@@ -409,9 +410,11 @@ export async function membershipFetch(request, env, url, parts, text) {
     if (!id) {
       return page("Discord didn't confirm who you are. Try again.", 400);
     }
-    if (taken.body.for === "web") {
+    // (the pages: back to the join page, or the admin page for for=web-admin, with the session in the hash)
+    if (taken.body.for === "web" || taken.body.for === "web-admin") {
       const { body: web } = await ask("/web/new", { id });
-      const back = new URL(env.PAGES_URL || `${env.PAGES_ORIGIN || ""}/join.html`);
+      const back = new URL(taken.body.for === "web-admin" ? env.PAGES_ADMIN_URL || `${env.PAGES_ORIGIN || ""}/admin.html`
+                                                          : env.PAGES_URL || `${env.PAGES_ORIGIN || ""}/join.html`);
       back.hash = `session=${web.session}`;
       return Response.redirect(back.toString(), 302);
     }
