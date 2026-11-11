@@ -185,3 +185,26 @@ test("a revoked member's socket is closed, and they can't come back", async () =
     restore();
   }
 });
+
+test("the game being played: a short id only, with playing only (community-three-panel-layout)", async () => {
+  const restore = fakeDiscord();
+  try {
+    const l = await lobby([["FI3RO", "MX"], ["HOKUTO", "BR"]]);
+    const a = await l.connect("FI3RO"), b = await l.connect("HOKUTO");
+    const hokuto = () => a.events("presence").at(-1).presence.find((p) => p.nickname === "HOKUTO");
+    await b.say({ type: "state", state: "playing", game: "ssf2t" });
+    assert.deepEqual([hokuto().state, hokuto().game], ["playing", "ssf2t"]);
+    // (markup, too long, upper case, not a string: playing with no game, and none of the text sent on)
+    // (three: with the first and the last, five events, the burst the lobby allows)
+    for (const game of ["<b>ssf2t</b>", "x".repeat(200), 42]) {
+      await b.say({ type: "state", state: "playing", game });
+      assert.deepEqual([hokuto().state, hokuto().game], ["playing", undefined]);
+      assert.ok(!JSON.stringify(a.events("presence").at(-1)).includes("<b>"));
+    }
+    // (a game with the lobby state is dropped; back to the lobby clears it)
+    await b.say({ type: "state", state: "lobby", game: "ssf2t" });
+    assert.deepEqual([hokuto().state, hokuto().game], ["lobby", undefined]);
+  } finally {
+    restore();
+  }
+});

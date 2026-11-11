@@ -93,7 +93,7 @@ export class Community {
       }
       const w = this.who(ws);
       if (w.id && !seen.has(w.id)) {
-        seen.set(w.id, { nickname: w.nickname, flag: w.flag, role: w.role, state: w.state || "lobby" });
+        seen.set(w.id, { nickname: w.nickname, flag: w.flag, role: w.role, state: w.state || "lobby", ...(w.game ? { game: w.game } : {}) });
       }
     }
     return [...seen.values()].sort((a, b) => a.nickname.localeCompare(b.nickname));
@@ -236,9 +236,11 @@ export class Community {
     }
     if (event.type === "state") {
       const state = ["lobby", "playing", "watching"].includes(event.state) ? event.state : "lobby";
+      // (community-three-panel-layout: the game being played, a short id only; anything else is no game)
+      const game = state === "playing" && typeof event.game === "string" && /^[a-z0-9_]{1,24}$/.test(event.game) ? event.game : "";
       for (const s of this.sockets()) {
         if (this.who(s).id === me.id) {
-          s.serializeAttachment({ ...this.who(s), state });
+          s.serializeAttachment({ ...this.who(s), state, game });
         }
       }
       this.broadcast({ type: "presence", presence: this.presence() });

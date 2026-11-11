@@ -75,6 +75,12 @@ and `GET /v1/auth/request/ID?secret=S` (the launcher's sign-in), `POST /v1/membe
 The first administrator (`ADMIN_DISCORD_ID`) chooses a nickname on the join page with no approval to wait for, and is
 not changed or revoked from the admin page.
 
+The public lobby (`src/community.js`, the `Community` object): `GET /v1/community/socket` with the session in the
+WebSocket subprotocol (`forkade.v1, s.<session>`). Events in: `say`, `state` (`lobby`, `playing` with an optional
+`game` id of `[a-z0-9_]{1,24}`, or `watching`), and moderators' `delete`, `mute`, `kick`. Events out: `hello` (you,
+presence, history), `presence` (each member's nickname, flag, role, state and game), `message`, `deleted`, `muted`,
+`refused`.
+
 Local run: `node online/dev/server.mjs [PORT] [SITE_DIR]` uses a fake Discord (choose who signs in);
 `--real-discord` uses Discord itself with the values in `online/.dev.vars` (the application must list
 `http://127.0.0.1:PORT/v1/auth/discord/callback` among its redirects). Nothing is kept when it stops.
