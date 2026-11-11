@@ -194,6 +194,9 @@ export const kLimits = {
   room: { player: 20, network: 120 },
   leave: { player: 20 },
   decline: { player: 30 },
+  // (this fork, discord-community-lobby: the sign-ins and requests to join, which write to Members' storage; a person
+  // signing in makes two or three, a home of several a few more)
+  signin: { network: 20 },
 };
 
 // The network a request came from, as the limits key it: an address cut to its /24 (IPv4) or /48 (IPv6)
@@ -282,6 +285,22 @@ export default {
     }
     // (the network's limit for the actions not counted by an object of their own: hosting, joining, looking up a code)
     const network = networkOf(request);
+    // (and for the membership routes that write: starting a Discord sign-in, its callback, a launcher's sign-in
+    // request and a request to join; reading one's own state, the launcher's polling and the admin's own are not)
+    const writes = route.name === "membership" &&
+                   ((request.method === "GET" && parts[1] === "auth" && parts[2] === "discord") ||
+                    (request.method === "POST" && parts[1] === "auth" && parts[2] === "request" && parts.length === 3) ||
+                    (request.method === "POST" && parts[1] === "members" && parts[2] === "request"));
+    if (writes) {
+      const limits = env.LIMITS_COUNTER.get(env.LIMITS_COUNTER.idFromName("all"));
+      const said = await (await limits.fetch("https://limits/hit", { method: "POST", body: JSON.stringify({ action: "signin", network }) })).json();
+      if (said.wait) {
+        const refused = overLimit(env, "signin", said.by, said.wait);
+        if (refused) {
+          return refused;
+        }
+      }
+    }
     if (route.name === "host" || route.name === "join" || route.name === "code") {
       const limits = env.LIMITS_COUNTER.get(env.LIMITS_COUNTER.idFromName("all"));
       const asked = route.name === "host" ? parseObject(text) : null;

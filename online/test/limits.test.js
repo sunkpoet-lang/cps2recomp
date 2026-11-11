@@ -106,3 +106,23 @@ test("one player checking in too often is slowed; another in the same home is no
   assert.equal(statuses.filter((s) => s === 429).length, 10);
   assert.equal((await call("POST", "/v1/room", b, { from: "203.0.113.8" })).status, 200);
 }));
+
+test("sign-in floods are refused per network once enforced; an honest sign-in and other homes are not", quiet(async () => {
+  const { call } = service({ LIMITS: "enforce", DISCORD_CLIENT_ID: "1", PUBLIC_URL: "https://online.test" });
+  // (an honest sign-in from the launcher: its request, then the browser at Discord's start)
+  assert.equal((await call("POST", "/v1/auth/request", "", { from: "198.51.100.20" })).status, 200);
+  assert.equal((await call("GET", "/v1/auth/discord/start?for=web", undefined, { from: "198.51.100.20" })).status, 302);
+  // (a flood of sign-in starts and requests from one network: refused past 20 a minute, with the wait)
+  const statuses = [];
+  for (let i = 0; i < 60; i++) {
+    const r = i % 2 ? await call("POST", "/v1/auth/request", "", { from: "203.0.113.9" }) : await call("GET", "/v1/auth/discord/start?for=web", undefined, { from: "203.0.113.9" });
+    statuses.push(r.status);
+  }
+  assert.equal(statuses.filter((s) => s !== 429).length, 20);
+  const refused = await call("POST", "/v1/auth/request", "", { from: "203.0.113.10" });
+  assert.equal(refused.status, 429);
+  assert.ok(Number(refused.headers.get("retry-after")) > 0);
+  // (another home still signs in; reading one's own state is not counted)
+  assert.equal((await call("GET", "/v1/auth/discord/start?for=web", undefined, { from: "192.0.2.50" })).status, 302);
+  assert.equal((await call("POST", "/v1/members/me", { session: "0".repeat(64) }, { from: "203.0.113.9" })).status, 401);
+}));
