@@ -156,7 +156,8 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname.startsWith("/site/")) {
       if (url.pathname === "/site/config.js") {
         res.writeHead(200, { "content-type": types[".js"] });
-        return res.end(`window.FORKADE_API = ${JSON.stringify(base)};\n`);
+        // (the real config.js after it: the Discord invitation and anything else it sets)
+        return res.end(`window.FORKADE_API = ${JSON.stringify(base)};\n` + fs.readFileSync(path.join(site, "config.js"), "utf8"));
       }
       const file = path.join(site, path.normalize(url.pathname.slice(6)).replace(/^(\.\.[/\\])+/, ""));
       if (!file.startsWith(site) || !fs.existsSync(file)) {
