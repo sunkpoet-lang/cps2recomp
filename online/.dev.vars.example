@@ -5,6 +5,9 @@ DISCORD_CLIENT_ID=000000000000000000
 DISCORD_CLIENT_SECRET=not-a-real-secret
 # the Discord user id of the first administrator (Daniel's)
 ADMIN_DISCORD_ID=000000000000000000
-# where the service is reached, for Discord's redirect back, and the registration pages' origin (GitHub Pages)
+# where the service is reached, for Discord's redirect back; the registration pages are its own static assets
+# (/join, /admin), so their origin is the same
 PUBLIC_URL=http://127.0.0.1:8787
-PAGES_ORIGIN=http://127.0.0.1:8000
+PAGES_ORIGIN=http://127.0.0.1:8787
+PAGES_URL=http://127.0.0.1:8787/join
+PAGES_ADMIN_URL=http://127.0.0.1:8787/admin

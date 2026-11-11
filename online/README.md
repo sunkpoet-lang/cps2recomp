@@ -67,7 +67,10 @@ object). Its secrets are Worker secrets (`wrangler secret put NAME`), never in t
 - `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`: the Discord application's (OAuth2, `identify` scope only).
 - `ADMIN_DISCORD_ID`: the first administrator's Discord user id.
 - `PUBLIC_URL`: where this service is reached (Discord sends people back to `PUBLIC_URL/v1/auth/discord/callback`).
-- `PAGES_ORIGIN`, `PAGES_URL`: the registration pages' origin (CORS) and the join page people come back to.
+- `PAGES_ORIGIN`, `PAGES_URL`, `PAGES_ADMIN_URL`: the registration pages' origin (CORS) and the join and admin pages
+  people come back to. The pages are this Worker's own static assets (`[assets]` in wrangler.toml: `online/site`, a
+  copy of ForkAde's `site/` made by `tools/sync-site.sh`), at `PUBLIC_URL/join` and `PUBLIC_URL/admin`, with
+  `site/_headers`' headers (no framing, scripts and calls from this origin only).
 
 Routes: `GET /v1/auth/discord/start?for=web|<sign-in id>`, `GET /v1/auth/discord/callback`, `POST /v1/auth/request`
 and `GET /v1/auth/request/ID?secret=S` (the launcher's sign-in), `POST /v1/members/me`, `POST /v1/members/request`,

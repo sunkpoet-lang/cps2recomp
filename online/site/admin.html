@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Administración de ForkAde</title>
+<style>
+  :root { --bg: #16171a; --card: #1f2024; --text: #e8e8ea; --muted: #a3a4aa; --accent: #5865f2; --border: #34353b; --bad: #ff7b72; --good: #7ee787; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, sans-serif; }
+  main { max-width: 760px; margin: 40px auto; padding: 0 16px; }
+  h1 { font-size: 22px; font-weight: 600; margin: 0 0 16px; }
+  h2 { font-size: 16px; font-weight: 600; margin: 24px 0 8px; color: var(--muted); }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 4px 16px; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; padding: 10px 0; border-top: 1px solid var(--border); }
+  .row:first-child { border-top: 0; }
+  .who { font-weight: 600; }
+  .meta { color: var(--muted); font-size: 13px; }
+  .actions { display: flex; gap: 6px; align-items: center; }
+  .flag { display: inline-block; width: 24px; height: 18px; background: url(flags.png) no-repeat; vertical-align: -3px; border-radius: 2px; margin-right: 6px; }
+  button, select, a.button { padding: 6px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font: inherit; cursor: pointer; text-decoration: none; }
+  a.button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; display: inline-block; }
+  button.bad { color: var(--bad); }
+  .empty { color: var(--muted); padding: 12px 0; }
+  .note { color: var(--bad); margin: 8px 0; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Administración de ForkAde</h1>
+  <div id="signin">
+    <p class="meta">Solo para administradores.</p>
+    <a class="button primary" id="discord">Entrar con Discord</a>
+  </div>
+  <div class="note" id="error" role="alert"></div>
+  <div id="panel" hidden>
+    <h2>Solicitudes pendientes</h2>
+    <div class="card" id="requests"></div>
+    <h2>Miembros</h2>
+    <div class="card" id="members"></div>
+    <h2>Registro (30 días)</h2>
+    <div class="card" id="log"></div>
+  </div>
+</main>
+<script src="config.js"></script>
+<script src="common.js"></script>
+<script>
+  const $ = (id) => document.getElementById(id);
+  $("discord").href = ForkAde.signInUrl("web-admin");
+  const roles = { member: "Miembro", moderator: "Moderador", admin: "Administrador" };
+  const actions = { approve: "aprobó", refuse: "rechazó", role: "cambió el rol de", revoke: "revocó", delete: "borró un mensaje de", mute: "silenció", kick: "expulsó" };
+  // (one's own action: "QCHO se unió como administrador")
+  const ownActions = { joined: "se unió como administrador" };
+
+  function el(tag, attrs = {}, ...children) {
+    const node = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs)) {
+      if (k === "onclick") node.addEventListener("click", v);
+      else if (k === "onchange") node.addEventListener("change", v);
+      else node.setAttribute(k, v);
+    }
+    for (const child of children) node.append(child);
+    return node;
+  }
+
+  async function act(path, body) {
+    $("error").textContent = "";
+    const said = await ForkAde.call(path, { session: ForkAde.session(), ...body });
+    if (!said.ok) {
+      $("error").textContent = said.body.error || "No se pudo.";
+    }
+    await refresh();
+  }
+
+  async function refresh() {
+    const session = ForkAde.session();
+    if (!session) return;
+    const list = await ForkAde.call("/v1/admin/list", { session });
+    if (!list.ok) {
+      $("error").textContent = list.status === 403 ? "Tu cuenta no es de administrador." : list.body.error || "Vuelve a entrar.";
+      return;
+    }
+    $("signin").hidden = true;
+    $("panel").hidden = false;
+    const byId = {};
+    const pending = list.body.requests.filter((r) => !r.refused);
+    $("requests").replaceChildren(...(pending.length ? pending.map((r) => {
+      byId[r.id] = r.nickname;
+      return el("div", { class: "row" },
+        el("div", {}, el("div", { class: "who" }, ForkAde.flagNode(r.flag), r.nickname), el("div", { class: "meta" }, `Discord ${r.id} · ${new Date(r.asked).toLocaleString("es")}`)),
+        el("div", { class: "actions" },
+          el("button", { onclick: () => act("/v1/admin/approve", { id: r.id }) }, "Aprobar"),
+          el("button", { class: "bad", onclick: () => act("/v1/admin/refuse", { id: r.id }) }, "Rechazar")));
+    }) : [el("div", { class: "empty" }, "No hay solicitudes.")]));
+    $("members").replaceChildren(...(list.body.members.length ? list.body.members.map((m) => {
+      byId[m.id] = m.nickname;
+      const role = el("select", { "aria-label": `Rol de ${m.nickname}`, onchange: (e) => act("/v1/admin/role", { id: m.id, role: e.target.value }) },
+        ...Object.entries(roles).map(([value, name]) => { const o = el("option", { value }, name); if (value === m.role) o.selected = true; return o; }));
+      return el("div", { class: "row" },
+        el("div", {}, el("div", { class: "who" }, ForkAde.flagNode(m.flag), m.nickname), el("div", { class: "meta" }, `Discord ${m.id} · desde ${new Date(m.joined).toLocaleDateString("es")}`)),
+        // (the first administrator, named by the service's settings, is not changed or revoked from here)
+        m.fixed ? el("div", { class: "actions meta" }, roles.admin)
+                : el("div", { class: "actions" }, role,
+                    el("button", { class: "bad", onclick: () => confirm(`¿Revocar a ${m.nickname}? Pierde el acceso al lobby.`) && act("/v1/admin/revoke", { id: m.id }) }, "Revocar")));
+    }) : [el("div", { class: "empty" }, "Todavía no hay miembros.")]));
+    const log = await ForkAde.call("/v1/admin/log", { session });
+    const entries = (log.body.log || []).slice().reverse();
+    $("log").replaceChildren(...(entries.length ? entries.map((x) => el("div", { class: "row" },
+      el("div", {}, ownActions[x.action] ? `${byId[x.by] || x.by} ${ownActions[x.action]}`
+                    : `${byId[x.by] || x.by} ${actions[x.action] || x.action} ${byId[x.who] || x.who}${x.detail ? ` (${roles[x.detail] || x.detail})` : ""}`),
+      el("div", { class: "meta" }, new Date(x.at).toLocaleString("es")))) : [el("div", { class: "empty" }, "Sin acciones.")]));
+  }
+  refresh();
+</script>
+</body>
+</html>

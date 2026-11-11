@@ -60,3 +60,11 @@ new_sqlite_classes = ["Members", "Community"]
 # Limits are only logged until this says "enforce" (online-abuse-protection's rollout: log first, then refuse)
 [vars]
 LIMITS = "log"
+
+# (this fork, ForkAde's discord-community-lobby) The registration and admin pages, served as the Worker's static
+# assets at /join and /admin, with site/_headers' headers. online/site is a copy of ForkAde's site/ (tools/sync-site.sh;
+# --check in the checks). Paths that are not a file of it go to the Worker as before.
+[assets]
+directory = "./site"
+html_handling = "auto-trailing-slash"
+not_found_handling = "none"

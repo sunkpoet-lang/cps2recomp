@@ -42,14 +42,18 @@ check-widescreen: port
 
 else
 
-.PHONY: check audit example smoke check-common clean games collection collection-app android
-check: audit check-common smoke
+.PHONY: check audit example smoke check-common check-site clean games collection collection-app android
+check: audit check-common check-site smoke
 
 audit:
 	@tools/audit.sh
 
 check-common:
 	@tools/sync-common.sh --check
+
+# (this fork) online/site: ForkAde's registration pages, as the Worker serves them
+check-site:
+	@sh tools/sync-site.sh --check
 
 example:
 	@$(MAKE) --no-print-directory -C example NO_APP=1

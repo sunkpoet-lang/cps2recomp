@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Únete a la beta de ForkAde</title>
+<style>
+  :root { --bg: #16171a; --card: #1f2024; --text: #e8e8ea; --muted: #a3a4aa; --accent: #5865f2; --border: #34353b; --bad: #ff7b72; --good: #7ee787; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.6 system-ui, sans-serif; }
+  main { max-width: 520px; margin: 48px auto; padding: 0 16px; }
+  h1 { font-size: 24px; font-weight: 600; margin: 0 0 8px; }
+  p { color: var(--muted); margin: 0 0 16px; }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
+  label { display: block; font-size: 14px; color: var(--muted); margin: 14px 0 6px; }
+  input, select { width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font: inherit; }
+  button, a.button { display: inline-block; margin-top: 18px; padding: 10px 18px; border: 0; border-radius: 8px; background: var(--accent); color: #fff; font: inherit; font-weight: 600; text-decoration: none; cursor: pointer; }
+  .note { font-size: 14px; margin-top: 12px; }
+  .bad { color: var(--bad); }
+  .good { color: var(--good); }
+  .flag { display: inline-block; width: 24px; height: 18px; background: url(flags.png) no-repeat; vertical-align: -3px; border-radius: 2px; margin-right: 6px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Únete a la beta de ForkAde</h1>
+  <p>ForkAde es una comunidad para jugar retas en línea. La beta es por invitación: entra con tu cuenta de Discord, elige tu apodo y tu bandera, y un administrador aprobará tu solicitud.</p>
+
+  <div class="card" id="signin">
+    <p>Solo usamos tu id de Discord: no guardamos tu correo, tu avatar ni tus servidores.</p>
+    <a class="button" id="discord">Entrar con Discord</a>
+    <p class="note">¿Aún no estás en el servidor de la comunidad? <a id="invite" target="_blank" rel="noopener">Únete al Discord de ForkAde</a>: ahí avisamos de las pruebas y de las retas.</p>
+  </div>
+
+  <form class="card" id="ask" hidden>
+    <label for="nickname">Apodo (3 a 16: letras, números, _ y -)</label>
+    <input id="nickname" maxlength="16" autocomplete="off" required pattern="[A-Za-z0-9_\-]{3,16}" placeholder="FI3RO">
+    <label for="flag">Bandera <span id="flag-shown"></span></label>
+    <select id="flag" required></select>
+    <button type="submit">Enviar solicitud</button>
+    <div class="note bad" id="error" role="alert"></div>
+  </form>
+
+  <div class="card" id="state" hidden>
+    <p id="state-text"></p>
+    <a class="button" id="again" hidden>Entrar con otra cuenta</a>
+  </div>
+</main>
+<script src="config.js"></script>
+<script src="common.js"></script>
+<script>
+  const $ = (id) => document.getElementById(id);
+  $("discord").href = ForkAde.signInUrl("web");
+  $("again").href = ForkAde.signInUrl("web");
+  $("invite").href = window.FORKADE_DISCORD_INVITE;
+  for (const { code, name } of ForkAde.countries()) {
+    const option = document.createElement("option");
+    option.value = code;
+    option.textContent = name;
+    $("flag").appendChild(option);
+  }
+
+  // (text: a string, or strings and nodes such as a flag)
+  function show(text, good) {
+    $("signin").hidden = true;
+    $("ask").hidden = true;
+    $("state").hidden = false;
+    $("state-text").replaceChildren(...[].concat(text));
+    $("state-text").className = good ? "good" : "";
+    $("again").hidden = false;
+  }
+
+  async function start() {
+    const session = ForkAde.session();
+    if (!session) {
+      return;
+    }
+    const me = await ForkAde.call("/v1/members/me", { session });
+    if (!me.ok) {
+      ForkAde.signOut();
+      return;
+    }
+    // (the first administrator has a role before a nickname: they choose it here, with nothing to wait for)
+    if (me.body.role && me.body.nickname) {
+      return show(["Ya eres miembro como ", ForkAde.flagNode(me.body.flag), `${me.body.nickname}. Entra desde el launcher de ForkAde.`], true);
+    }
+    if (me.body.request === "pending") {
+      return show(["Tu solicitud como ", ForkAde.flagNode(me.body.flag), `${me.body.nickname} espera aprobación.`]);
+    }
+    if (me.body.request === "refused") {
+      return show("Tu solicitud no fue aprobada.");
+    }
+    $("signin").hidden = true;
+    $("ask").hidden = false;
+    $("nickname").focus();
+  }
+
+  $("nickname").addEventListener("input", () => ($("error").textContent = ""));
+  // (the chosen flag shown beside its label)
+  const shownFlag = () => $("flag-shown").replaceChildren(ForkAde.flagNode($("flag").value));
+  $("flag").addEventListener("change", shownFlag);
+  shownFlag();
+  $("ask").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const nickname = $("nickname").value.trim();
+    if (!/^[A-Za-z0-9_-]{3,16}$/.test(nickname)) {
+      $("error").textContent = "El apodo lleva de 3 a 16 letras, números, _ o -.";
+      return;
+    }
+    const said = await ForkAde.call("/v1/members/request", { session: ForkAde.session(), nickname, flag: $("flag").value });
+    if (!said.ok) {
+      const errors = { "That nickname is taken": "Ese apodo ya está tomado.", "Sign in again.": "Vuelve a entrar con Discord." };
+      $("error").textContent = errors[said.body.error] || said.body.error || "No se pudo enviar. Intenta de nuevo.";
+      return;
+    }
+    if (said.body.member) {
+      return show(["Listo: ya eres miembro como ", ForkAde.flagNode(said.body.flag), `${said.body.nickname}. Entra desde el launcher de ForkAde.`], true);
+    }
+    show(["Listo: tu solicitud como ", ForkAde.flagNode($("flag").value), `${nickname} espera aprobación.`], true);
+  });
+  start();
+</script>
+</body>
+</html>

@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // (this fork, ForkAde's discord-community-lobby) A local dev server: the online Worker with the tests' in-memory
 // stand-in for Durable Objects (test/fake.js), a fake Discord that lets you choose who signs in, and ForkAde's
-// registration pages. Nothing leaves this machine; nothing is kept when it stops.
-//   node online/dev/server.mjs [PORT] [SITE_DIR]      (8787; ../ForkAde/site)
-// Then: http://127.0.0.1:PORT/site/join.html and /site/admin.html. The first administrator is Discord id
-// 100000000000000001 (choose it on the fake Discord page).
+// registration pages served as the Worker's static assets serve them. Nothing leaves this machine; nothing is kept
+// when it stops.
+//   node online/dev/server.mjs [PORT] [SITE_DIR]      (8787; online/site, the copy tools/sync-site.sh makes)
+// Then: http://127.0.0.1:PORT/join and /admin. The first administrator is Discord id 100000000000000001 (choose it on
+// the fake Discord page).
 import crypto from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
@@ -18,7 +19,8 @@ import { service } from "../test/fake.js";
 const real = process.argv.includes("--real-discord");
 const args = process.argv.slice(2).filter((a) => a !== "--real-discord");
 const port = Number(args[0]) || 8787;
-const site = path.resolve(args[1] || "D:/CPS2/ForkAde/site");
+const here = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
+const site = path.resolve(args[1] || path.join(here, "..", "site"));
 const base = `http://127.0.0.1:${port}`;
 function devVars() {
   const file = path.join(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1")), "..", ".dev.vars");
@@ -44,8 +46,8 @@ const { env } = service({
   DISCORD_CLIENT_SECRET: real ? vars.DISCORD_CLIENT_SECRET : "dev",
   PUBLIC_URL: base,
   PAGES_ORIGIN: base,
-  PAGES_URL: `${base}/site/join.html`,
-  PAGES_ADMIN_URL: `${base}/site/admin.html`,
+  PAGES_URL: `${base}/join`,
+  PAGES_ADMIN_URL: `${base}/admin`,
   ...(real ? {} : { DISCORD_AUTHORIZE_URL: `${base}/fake-discord/authorize`, DISCORD_API: `${base}/fake-discord/api` }),
   LIMITS: "log",
 });
@@ -77,7 +79,41 @@ function fakeAuthorize(url) {
 ${choices.map(([id, name]) => `<a href="${back}?code=code-${id}&state=${encodeURIComponent(state)}">${name}<br><small>${id}</small></a>`).join("")}`;
 }
 
-const types = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css" };
+const types = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css", ".png": "image/png",
+                ".txt": "text/plain; charset=utf-8" };
+// A site file for a path, as Cloudflare's static assets find it: "/join" is join.html ("/join.html" is not served
+// here, where Cloudflare would redirect it), "/flags.png" itself; _headers and anything outside the site are not
+function assetOf(pathname) {
+  let name;
+  try {
+    name = decodeURIComponent(pathname).replace(/^\/+/, "");
+  } catch {
+    return null;
+  }
+  if (!name || name.includes("..") || name.includes("\\") || name.startsWith("_") || name.endsWith(".html")) {
+    return null;
+  }
+  for (const file of [path.join(site, `${name}.html`), path.join(site, name)]) {
+    if (file.startsWith(site + path.sep) && fs.existsSync(file) && fs.statSync(file).isFile()) {
+      return file;
+    }
+  }
+  return null;
+}
+// The "/*" block of the site's _headers, as headers
+function siteHeaders() {
+  const out = {};
+  const file = path.join(site, "_headers");
+  if (fs.existsSync(file)) {
+    for (const line of fs.readFileSync(file, "utf8").split(/\r?\n/)) {
+      const m = line.match(/^\s+([A-Za-z-]+):\s*(.+)$/);
+      if (m) {
+        out[m[1].toLowerCase()] = m[2];
+      }
+    }
+  }
+  return out;
+}
 
 // A WebSocket for a real client (the launcher): the handshake, then text frames both ways, bridged to the Community
 // object's fake socket (test/fake.js). Enough for testing: text frames, ping/pong, close; no extensions.
@@ -175,19 +211,12 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
       return res.end(fakeAuthorize(url));
     }
-    if (url.pathname.startsWith("/site/")) {
-      if (url.pathname === "/site/config.js") {
-        res.writeHead(200, { "content-type": types[".js"] });
-        // (the real config.js after it: the Discord invitation and anything else it sets)
-        return res.end(`window.FORKADE_API = ${JSON.stringify(base)};\n` + fs.readFileSync(path.join(site, "config.js"), "utf8"));
-      }
-      const file = path.join(site, path.normalize(url.pathname.slice(6)).replace(/^(\.\.[/\\])+/, ""));
-      if (!file.startsWith(site) || !fs.existsSync(file)) {
-        res.writeHead(404);
-        return res.end("not here");
-      }
-      res.writeHead(200, { "content-type": types[path.extname(file)] || "application/octet-stream" });
-      return res.end(fs.readFileSync(file));
+    // (the static assets, as Cloudflare serves them: a file of the site at its path, an .html one without its
+    // extension, with _headers' headers; anything else goes to the Worker)
+    const asset = assetOf(url.pathname);
+    if (asset && ["GET", "HEAD"].includes(req.method)) {
+      res.writeHead(200, { "content-type": types[path.extname(asset)] || "application/octet-stream", ...siteHeaders() });
+      return res.end(req.method === "HEAD" ? undefined : fs.readFileSync(asset));
     }
     const chunks = [];
     for await (const chunk of req) {
@@ -213,4 +242,4 @@ const server = http.createServer(async (req, res) => {
   }
 });
 server.on("upgrade", upgrade);
-server.listen(port, "127.0.0.1", () => console.log(`ForkAde dev server: ${base}/site/join.html (admin: ${base}/site/admin.html)`));
+server.listen(port, "127.0.0.1", () => console.log(`ForkAde dev server: ${base}/join (admin: ${base}/admin)`));
