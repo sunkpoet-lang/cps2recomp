@@ -72,3 +72,9 @@ object). Its secrets are Worker secrets (`wrangler secret put NAME`), never in t
 Routes: `GET /v1/auth/discord/start?for=web|<sign-in id>`, `GET /v1/auth/discord/callback`, `POST /v1/auth/request`
 and `GET /v1/auth/request/ID?secret=S` (the launcher's sign-in), `POST /v1/members/me`, `POST /v1/members/request`,
 `POST /v1/admin/list|approve|refuse|role|revoke|log` (administrators only). Nothing from Discord is kept but the id.
+The first administrator (`ADMIN_DISCORD_ID`) chooses a nickname on the join page with no approval to wait for, and is
+not changed or revoked from the admin page.
+
+Local run: `node online/dev/server.mjs [PORT] [SITE_DIR]` uses a fake Discord (choose who signs in);
+`--real-discord` uses Discord itself with the values in `online/.dev.vars` (the application must list
+`http://127.0.0.1:PORT/v1/auth/discord/callback` among its redirects). Nothing is kept when it stops.
