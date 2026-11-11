@@ -44,6 +44,19 @@ class_name = "Limits"
 tag = "v5"
 new_sqlite_classes = ["Limits"]
 
+# (this fork, ForkAde's discord-community-lobby) Who may use the social layer, and the public lobby's chat
+[[durable_objects.bindings]]
+name = "MEMBERS"
+class_name = "Members"
+
+[[durable_objects.bindings]]
+name = "COMMUNITY"
+class_name = "Community"
+
+[[migrations]]
+tag = "v6"
+new_sqlite_classes = ["Members", "Community"]
+
 # Limits are only logged until this says "enforce" (online-abuse-protection's rollout: log first, then refuse)
 [vars]
 LIMITS = "log"

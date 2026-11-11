@@ -43,6 +43,10 @@
 //
 // `addresses` are "IP:PORT" strings (IPv4, or [IPv6]:PORT), at most 8: each side's own, as STUN and its network say them.
 
+import { membershipFetch } from "./members.js";
+export { Members } from "./members.js";
+export { Community } from "./community.js";
+
 const kAlphabet = "23456789ABCDEFGHJKMNPQRSTUVWXYZ"; // (no 0 and O, 1 and I and L)
 const kLifetime = 30 * 60 * 1000;
 
@@ -147,6 +151,14 @@ function parseObject(text) {
 function routeOf(method, parts) {
   if (parts[0] !== "v1") {
     return method === "GET" ? { name: "home" } : null;
+  }
+  // (this fork, discord-community-lobby: the public lobby's socket, community.js)
+  if (parts[1] === "community" && parts[2] === "socket" && parts.length === 3) {
+    return method === "GET" ? { name: "community" } : null;
+  }
+  // (this fork, discord-community-lobby: membership, members.js; the pages' preflight too)
+  if (["auth", "members", "admin"].includes(parts[1]) && parts.length >= 3 && parts.length <= 4) {
+    return ["GET", "POST", "OPTIONS"].includes(method) ? { name: "membership", json: method === "POST" && !(parts[1] === "auth" && parts[2] === "request") } : null;
   }
   const kinds = {
     stats: { method: "GET", length: [2] },
@@ -288,6 +300,12 @@ export default {
       const stats = env.STATS.get(env.STATS.idFromName("all"));
       ctx.waitUntil(stats.fetch(`https://stats/${what}`, { method: "POST", body: JSON.stringify(body) }).catch(() => {}));
     };
+    if (route.name === "membership") {
+      return membershipFetch(request, env, url, parts, text);
+    }
+    if (route.name === "community") {
+      return env.COMMUNITY.get(env.COMMUNITY.idFromName("all")).fetch(new Request("https://community/socket", { headers: request.headers }));
+    }
     if (request.method === "GET" && parts[1] === "stats" && parts.length === 2) {
       return statsPage(env, url.searchParams.get("key") || "");
     }

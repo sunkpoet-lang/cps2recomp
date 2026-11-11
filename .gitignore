@@ -9,3 +9,6 @@ rom/
 *.state
 state*.bin
 frame_data.csv
+
+# (this fork) the online service's local secrets (online/.dev.vars.example says which)
+online/.dev.vars

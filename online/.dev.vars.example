@@ -1,0 +1,10 @@
+# The online service's secrets for a local run (wrangler dev reads online/.dev.vars, which git ignores): copy this
+# file to .dev.vars and put real values there, never here. In Cloudflare they are Worker secrets
+# (wrangler secret put NAME). ForkAde's discord-community-lobby.
+DISCORD_CLIENT_ID=000000000000000000
+DISCORD_CLIENT_SECRET=not-a-real-secret
+# the Discord user id of the first administrator (Daniel's)
+ADMIN_DISCORD_ID=000000000000000000
+# where the service is reached, for Discord's redirect back, and the registration pages' origin (GitHub Pages)
+PUBLIC_URL=http://127.0.0.1:8787
+PAGES_ORIGIN=http://127.0.0.1:8000

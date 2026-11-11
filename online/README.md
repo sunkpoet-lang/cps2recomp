@@ -57,3 +57,18 @@ npx wrangler dev       # or on this machine, at http://localhost:8787, for tests
 
 The games ask `Netplay::kService` (`port/netplay.h`) unless started with `--net-service URL` (or `off`: no codes,
 addresses only).
+
+## Membership (this fork, ForkAde's discord-community-lobby)
+
+The social layer lets in only people who signed in with Discord and were approved (`src/members.js`, the `Members`
+object). Its secrets are Worker secrets (`wrangler secret put NAME`), never in the repository; for a local run,
+`online/.dev.vars` (git-ignored; `.dev.vars.example` lists them):
+
+- `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`: the Discord application's (OAuth2, `identify` scope only).
+- `ADMIN_DISCORD_ID`: the first administrator's Discord user id.
+- `PUBLIC_URL`: where this service is reached (Discord sends people back to `PUBLIC_URL/v1/auth/discord/callback`).
+- `PAGES_ORIGIN`, `PAGES_URL`: the registration pages' origin (CORS) and the join page people come back to.
+
+Routes: `GET /v1/auth/discord/start?for=web|<sign-in id>`, `GET /v1/auth/discord/callback`, `POST /v1/auth/request`
+and `GET /v1/auth/request/ID?secret=S` (the launcher's sign-in), `POST /v1/members/me`, `POST /v1/members/request`,
+`POST /v1/admin/list|approve|refuse|role|revoke|log` (administrators only). Nothing from Discord is kept but the id.
