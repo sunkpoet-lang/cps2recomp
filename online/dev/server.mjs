@@ -5,6 +5,7 @@
 //   node online/dev/server.mjs [PORT] [SITE_DIR]      (8787; ../ForkAde/site)
 // Then: http://127.0.0.1:PORT/site/join.html and /site/admin.html. The first administrator is Discord id
 // 100000000000000001 (choose it on the fake Discord page).
+import crypto from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
@@ -56,7 +57,96 @@ ${choices.map(([id, name]) => `<a href="${back}?code=code-${id}&state=${encodeUR
 
 const types = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8", ".css": "text/css" };
 
-http.createServer(async (req, res) => {
+// A WebSocket for a real client (the launcher): the handshake, then text frames both ways, bridged to the Community
+// object's fake socket (test/fake.js). Enough for testing: text frames, ping/pong, close; no extensions.
+function frame(opcode, payload) {
+  const body = Buffer.from(payload);
+  const head = body.length < 126 ? Buffer.from([0x80 | opcode, body.length])
+             : body.length < 65536 ? Buffer.from([0x80 | opcode, 126, body.length >> 8, body.length & 255])
+             : Buffer.concat([Buffer.from([0x80 | opcode, 127]), (() => { const b = Buffer.alloc(8); b.writeBigUInt64BE(BigInt(body.length)); return b; })()]);
+  return Buffer.concat([head, body]);
+}
+
+function upgrade(req, socket) {
+  const url = new URL(req.url, base);
+  if (url.pathname !== "/v1/community/socket") {
+    socket.destroy();
+    return;
+  }
+  const headers = new Headers();
+  for (const [k, v] of Object.entries(req.headers)) {
+    if (typeof v === "string") {
+      headers.set(k, v);
+    }
+  }
+  worker.fetch(new Request(url, { headers }), env, ctx).then((answer) => {
+    if (answer.status !== 101) {
+      socket.end(`HTTP/1.1 ${answer.status} Refused\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
+      return;
+    }
+    const accept = crypto.createHash("sha1").update(req.headers["sec-websocket-key"] + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").digest("base64");
+    socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\nSec-WebSocket-Protocol: forkade.v1\r\n\r\n`);
+    const fake = answer.webSocket; // (the client's end of the object's pair)
+    for (const event of fake.inbox.splice(0)) {
+      socket.write(frame(1, JSON.stringify(event)));
+    }
+    fake.deliver = (data) => socket.write(frame(1, data));
+    fake.onclose = () => {
+      const code = fake.closed ? fake.closed.code : 1000;
+      const reason = fake.closed ? fake.closed.reason : "";
+      socket.end(frame(8, Buffer.concat([Buffer.from([code >> 8, code & 255]), Buffer.from(reason)])));
+    };
+    let pending = Buffer.alloc(0);
+    socket.on("data", (chunk) => {
+      pending = Buffer.concat([pending, chunk]);
+      for (;;) {
+        if (pending.length < 2) {
+          return;
+        }
+        const opcode = pending[0] & 15, masked = pending[1] & 128;
+        let length = pending[1] & 127, at = 2;
+        if (length === 126) {
+          if (pending.length < 4) return;
+          length = pending.readUInt16BE(2);
+          at = 4;
+        } else if (length === 127) {
+          if (pending.length < 10) return;
+          length = Number(pending.readBigUInt64BE(2));
+          at = 10;
+        }
+        const mask = masked ? pending.subarray(at, at + 4) : null;
+        at += masked ? 4 : 0;
+        if (pending.length < at + length) {
+          return;
+        }
+        const payload = Buffer.from(pending.subarray(at, at + length));
+        pending = pending.subarray(at + length);
+        if (mask) {
+          for (let i = 0; i < payload.length; i++) payload[i] ^= mask[i & 3];
+        }
+        if (opcode === 1) {
+          Promise.resolve(fake.send(payload.toString("utf8"))).catch((e) => console.error(e));
+        } else if (opcode === 9) {
+          socket.write(frame(10, payload));
+        } else if (opcode === 8) {
+          fake.onclose = null;
+          fake.close(1000, "bye");
+          socket.end(frame(8, payload.subarray(0, 2)));
+          return;
+        }
+      }
+    });
+    socket.on("close", () => {
+      if (!fake.closed) {
+        fake.onclose = null;
+        fake.close(1001, "gone");
+      }
+    });
+    socket.on("error", () => {});
+  });
+}
+
+const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, base);
   try {
     if (url.pathname === "/fake-discord/authorize") {
@@ -98,4 +188,6 @@ http.createServer(async (req, res) => {
     res.writeHead(500);
     res.end(String(error));
   }
-}).listen(port, "127.0.0.1", () => console.log(`ForkAde dev server: ${base}/site/join.html (admin: ${base}/site/admin.html)`));
+});
+server.on("upgrade", upgrade);
+server.listen(port, "127.0.0.1", () => console.log(`ForkAde dev server: ${base}/site/join.html (admin: ${base}/site/admin.html)`));
