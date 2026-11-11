@@ -374,13 +374,20 @@ async function discordId(env, code) {
     code,
     redirect_uri: `${env.PUBLIC_URL}/v1/auth/discord/callback`,
   });
-  const token = await fetch(`${api}/oauth2/token`, { method: "POST", body: form, headers: { "content-type": "application/x-www-form-urlencoded" } });
+  // (Discord asks API clients to say who they are; some requests without it are turned away)
+  const agent = "ForkAde-online (discord-community-lobby, 1.0)";
+  const token = await fetch(`${api}/oauth2/token`, {
+    method: "POST", body: form, headers: { "content-type": "application/x-www-form-urlencoded", "user-agent": agent },
+  });
   if (!token.ok) {
+    // (why, for the Worker's log: Discord's status and error, e.g. invalid_client or invalid_grant; never the secret)
+    console.log("discord token refused", token.status, (await token.text()).slice(0, 200));
     return null;
   }
   const { access_token: access } = await token.json();
-  const me = await fetch(`${api}/users/@me`, { headers: { authorization: `Bearer ${access}` } });
+  const me = await fetch(`${api}/users/@me`, { headers: { authorization: `Bearer ${access}`, "user-agent": agent } });
   if (!me.ok) {
+    console.log("discord user refused", me.status, (await me.text()).slice(0, 200));
     return null;
   }
   const { id } = await me.json();
