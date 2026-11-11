@@ -779,7 +779,7 @@ int RunWindowed(Port &port) {
         roomEeprom=port.machine->eeprom;
         port.machine->eeprom=Eeprom();port.machine->eeprom.eightBit=roomEeprom.eightBit;
         for (const auto& f:TheGame().features) savedFeatures[f.name]=FeatureSetting(f.name);
-        EndSessionFeatures();port.machine->Reset();port.machine->audio.clear();port.frame=0;
+        port.RecordEnd();EndSessionFeatures();port.machine->Reset();port.machine->audio.clear();port.frame=0;
         port.paused=false;port.steps=0;port.menu.SetFullSpeed();port.zoom.Forbid();
         port.opt.gekko.mode=OnlineOptions::Mode::Host;port.opt.gekko.port=7845;
         port.opt.gekko.matchFlow=true;port.opt.gekko.arcadeWait=true;
@@ -1032,6 +1032,8 @@ int RunWindowed(Port &port) {
                     } else {
                         port.zoom.Press(ev.key.scancode == SDL_SCANCODE_E ? 1 : 0);
                     }
+                } else if (port.replaying && (ev.key.scancode == SDL_SCANCODE_ESCAPE || ev.key.scancode == SDL_SCANCODE_AC_BACK)) {
+                    running = false; // (this fork, native-replays: a replay is left with Esc)
                 } else if (ev.key.scancode == SDL_SCANCODE_ESCAPE || ev.key.scancode == SDL_SCANCODE_F1 || ev.key.scancode == SDL_SCANCODE_AC_BACK ||
                            (ev.key.scancode == SDL_SCANCODE_TAB && !KeyBound(SDL_SCANCODE_TAB))) {
                     // (AC_BACK: a phone's Back)

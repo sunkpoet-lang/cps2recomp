@@ -708,6 +708,11 @@ inline constexpr recomp::i18n::Entry kPortuguese[] = {
     {"Shuffle: how long they fight on a stage before it fades into the next.", "Aleatório: quanto tempo lutam num cenário antes que ele se dissolva no próximo."},
     {"Stages", "Cenários"},
     {"Two players, each on their own machine with the game, anywhere: one hosts and gives the other the code their game shows; the other joins with it. Each presses Start to come in. The match has the host's board settings and the features that change play.", "Dois jogadores, cada um na sua máquina com o jogo, de qualquer lugar: um cria a partida e passa ao outro o código que o jogo dele mostra; o outro entra com ele. Cada um aperta Start para entrar. A partida usa os ajustes de placa e os recursos que mudam o jogo do anfitrião."},
+    {"REPLAY", "REPLAY"}, // (native-replays)
+    {"End of the replay - Esc to leave", "Fim do replay - Esc para sair"}, // (native-replays)
+    {"Stopped", "Parado"}, // (native-replays)
+    {"No longer matches", "Não confere mais"}, // (native-replays)
+    {"Not while watching a replay.", "Não enquanto assiste a um replay."}, // (native-replays)
 };
 
 } // namespace port

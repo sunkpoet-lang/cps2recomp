@@ -42,7 +42,7 @@ check-widescreen: port
 
 else
 
-.PHONY: check audit example smoke check-common check-site clean games collection collection-app android
+.PHONY: check audit example smoke check-common check-site check-replay clean games collection collection-app android
 check: audit check-common check-site smoke
 
 audit:
@@ -52,6 +52,10 @@ check-common:
 	@tools/sync-common.sh --check
 
 # (this fork) online/site: ForkAde's registration pages, as the Worker serves them
+# (this fork, native-replays) the .fareplay file's reader and writer
+check-replay:
+	@mkdir -p build/tests && $(CXX) -std=c++20 -O1 -Wall -Wextra -Werror tools/tests/replay_test.cpp port/replay.cpp -lz -o build/tests/replay_test && cd build/tests && ./replay_test
+
 check-site:
 	@sh tools/sync-site.sh --check
 

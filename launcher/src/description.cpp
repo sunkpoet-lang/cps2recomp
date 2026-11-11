@@ -550,6 +550,8 @@ const launcher::Collection& launcher::describe_collection() {
 #endif
         for (const GameInfo& game : kGames) {
             c.games.push_back({game.id, game.name, game.id, "", describe_game(game), *game.series ? game.series : nullptr});
+            // (native-replays: the CPS games save each match and play it back; Neo Geo's not yet)
+            c.games.back().replays = std::strcmp(game.board, "neogeo") != 0;
         }
         for (const OutsideGame& game : outside_games()) {
             c.games.push_back({game.id, game.name, game.id, "", describe_outside(game)});

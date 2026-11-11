@@ -40,9 +40,11 @@
 #include <deque>
 #include <filesystem>
 #include <set>
+#include <sstream>
 #include <thread>
 #ifdef _WIN32
 #include <windows.h>
+#include <bcrypt.h>
 #endif
 
 using namespace cps2recomp;
@@ -1161,11 +1163,11 @@ void Port::ToggleSoundtrack(bool say) {
 
 // What the game's state comes to, for comparing runs: the CPU, its memory, the video and object memory, the
 // registers and the picture
-uint32_t Port::StateHash() const {
+uint32_t Port::StateHash(bool replay) const {
     const Machine &m = *machine;
     uLong h = crc32(0, nullptr, 0);
     auto add = [&](const void *p, size_t size) { h = crc32(h, static_cast<const Bytef *>(p), static_cast<uInt>(size)); };
-    if (opt.hashPicture) {
+    if (opt.hashPicture && !replay) {
         add(m.Picture(), sizeof(uint32_t) * m.PictureWidth() * Video::kHeight);
         return static_cast<uint32_t>(h);
     }
@@ -1178,7 +1180,7 @@ uint32_t Port::StateHash() const {
     add(m.ram.data(), m.ram.size());
     add(m.videoRam.data(), m.videoRam.size());
     add(m.objectRam.data(), m.objectRam.size());
-    if (net || opt.hashNoSound) {
+    if (net || opt.hashNoSound || replay) {
         // (online: the sound side left out, as each player's custom soundtrack changes what it is asked, and the game
         // never reads back what it does)
     } else if (!opt.hashGame) {
@@ -1189,7 +1191,7 @@ uint32_t Port::StateHash() const {
         add(m.soundRam, 5);
         add(m.soundRam + 6, sizeof(m.soundRam) - 6);
     }
-    if (!opt.hashGame && !net && !opt.hashNoSound) {
+    if (!opt.hashGame && !net && !opt.hashNoSound && !replay) {
         add(m.soundRam2, sizeof(m.soundRam2));
         add(m.soundCpu.r, sizeof(m.soundCpu.r));
         add(m.soundCpu.r2, sizeof(m.soundCpu.r2));
@@ -1201,7 +1203,7 @@ uint32_t Port::StateHash() const {
     add(m.cpsA, sizeof(m.cpsA));
     add(m.cpsB, sizeof(m.cpsB));
     add(m.objectRegs, sizeof(m.objectRegs));
-    if (!opt.hashNoPicture) {
+    if (!opt.hashNoPicture && !replay) {
         add(m.Picture(), sizeof(uint32_t) * m.PictureWidth() * Video::kHeight);
     }
     return static_cast<uint32_t>(h);
@@ -1213,6 +1215,10 @@ void Port::MenuAct(Menu::Action action) {
         (!strcmp(TheGame().commands[command].name,"online_host") || !strcmp(TheGame().commands[command].name,"forkade_copy_code"));
     if (gekkoOnline && !roomCommand && action != Menu::Action::None && action != Menu::Action::Coin && action != Menu::Action::Quit) {
         menu.Note("Not while playing online.");
+        return;
+    }
+    if (replaying && action != Menu::Action::None && action != Menu::Action::Quit) {
+        menu.Note("Not while watching a replay.");
         return;
     }
     std::string error;
@@ -1237,6 +1243,7 @@ void Port::MenuAct(Menu::Action action) {
         menu.Note("Every option is back as it first was.");
         return;
     case Menu::Action::Reset:
+        RecordEnd();
         EndSessionFeatures();
         machine->Reset();
         menu.Close();
@@ -1701,6 +1708,63 @@ void Port::Shown(std::vector<uint32_t> &pixels, std::vector<SDL_Rect> *panels, b
             }
         }
     }
+    // (this fork, native-replays) A replay playing: "REPLAY  Name1  VS  Name2" in the online strip's style at the top,
+    // and under it what it came to (stopped, its end, where it stopped matching)
+    if (replaying) {
+        const recomp::text::Canvas canvas{px, W, H};
+        using recomp::text::Palette;
+        auto cut = [](const std::string &name) {
+            size_t letters = 0, at = 0;
+            for (; at < name.size(); at++) {
+                if ((static_cast<unsigned char>(name[at]) & 0xC0) != 0x80 && letters++ == 12) {
+                    break;
+                }
+            }
+            return name.substr(0, at);
+        };
+        const auto &names = replaying->info.players;
+        struct Part {
+            std::string text;
+            recomp::text::Color colour;
+        };
+        std::vector<Part> parts = {{recomp::i18n::Tr("REPLAY"), Palette::kNumber}};
+        if (!names.empty()) {
+            parts.push_back({cut(names[0]), Palette::kPlayer1});
+        }
+        parts.push_back({"VS", Palette::kVersus});
+        if (names.size() > 1) {
+            parts.push_back({cut(names[1]), Palette::kPlayer2});
+        }
+        const float gap = recomp::text::TextWidth("  ", 1);
+        float width = -gap;
+        for (const Part &part : parts) {
+            width += recomp::text::TextWidth(part.text.c_str(), 1) + gap;
+        }
+        float x = std::floor((W - width) / 2);
+        canvas.Fill(x - 4, 0, width + 8, 10, Palette::kBand);
+        if (panels) {
+            panels->push_back({static_cast<int>(x) - 4, 0, static_cast<int>(width) + 9, 10});
+        }
+        for (const Part &part : parts) {
+            canvas.Text(x, 1, 1, 0, part.colour, part.text.c_str());
+            x += recomp::text::TextWidth(part.text.c_str(), 1) + gap;
+        }
+        std::string below = replayEnded ? recomp::i18n::Tr("End of the replay - Esc to leave")
+                            : paused    ? recomp::i18n::Tr("Stopped")
+                                        : std::string();
+        if (!replayDrift.empty()) {
+            below = (below.empty() ? "" : below + " - ") + recomp::i18n::Tr("No longer matches") + " (" + replayDrift.substr(replayDrift.rfind(' ') + 1) + ")";
+        }
+        if (!below.empty()) {
+            const float w = recomp::text::TextWidth(below.c_str(), 1);
+            const float bx = std::floor((W - w) / 2);
+            canvas.Fill(bx - 4, 10, w + 8, 10, Palette::kBand);
+            canvas.Text(bx, 11, 1, 0, replayDrift.empty() ? Palette::kVersus : Palette::kPlayer2, below.c_str());
+            if (panels) {
+                panels->push_back({static_cast<int>(bx) - 4, 10, static_cast<int>(w) + 9, 10});
+            }
+        }
+    }
     // The chat: its lines at the left, above the super gauges, the newest lowest, and the line being typed under them
     // (this fork: over either online session, Chat)
     if (Chat()) {
@@ -1938,7 +2002,7 @@ bool Port::Screenshot() {
     return true;
 }
 
-bool Port::SaveState(const std::string &path, std::string &error) {
+std::vector<uint8_t> Port::StateBytes() {
     std::vector<uint8_t> data;
     Archive ar(data, true);
     ar.Mark(0x43505332);
@@ -1948,6 +2012,11 @@ bool Port::SaveState(const std::string &path, std::string &error) {
     if (TheGame().state) {
         TheGame().state(ar);
     }
+    return data;
+}
+
+bool Port::SaveState(const std::string &path, std::string &error) {
+    const std::vector<uint8_t> data = StateBytes();
     if (!WriteFile(path, data.data(), data.size())) {
         error = "cannot write " + path;
         return false;
@@ -1972,6 +2041,321 @@ bool Port::SaveState(const std::string &path, std::string &error) {
     }
     WritePng(StatePicture(path).c_str(), small.data(), static_cast<uint32_t>(w), static_cast<uint32_t>(h));
     return true;
+}
+
+namespace {
+
+// (native-replays) The game's options as the player has them, and whether online play's rules are on: a change
+// begins another replay
+std::vector<int> FeatureSnapshot() {
+    std::vector<int> values;
+    for (const auto &feature : TheGame().features) {
+        values.push_back(FeatureSetting(feature.name));
+    }
+    values.push_back(TheGame().online ? 1 : 0);
+    return values;
+}
+
+std::string FeatureText() {
+    std::string text;
+    for (const auto &feature : TheGame().features) {
+        text += (text.empty() ? "" : ",") + std::string(feature.name) + "=" + std::to_string(FeatureSetting(feature.name));
+    }
+    return text;
+}
+
+// 2026-11-11T20:41:00-06:00 (the local time, with its offset)
+std::string LocalTimeText(std::time_t t, bool forFile) {
+    std::tm local{};
+#ifdef _WIN32
+    localtime_s(&local, &t);
+#else
+    localtime_r(&t, &local);
+#endif
+    char text[64];
+    if (forFile) {
+        std::strftime(text, sizeof(text), "%Y-%m-%d_%H-%M-%S", &local);
+        return text;
+    }
+    std::strftime(text, sizeof(text), "%Y-%m-%dT%H:%M:%S%z", &local);
+    std::string out = text;
+    if (out.size() >= 5 && (out[out.size() - 5] == '+' || out[out.size() - 5] == '-')) {
+        out.insert(out.size() - 2, ":");
+    }
+    return out;
+}
+
+// A name as it can be in a file's name: what Windows refuses there made _, and not too long (whole UTF-8 letters)
+std::string FileSafe(const std::string &name, const char *otherwise) {
+    std::string out;
+    for (size_t i = 0; i < name.size(); i++) {
+        const unsigned char c = static_cast<unsigned char>(name[i]);
+        if (out.size() >= 24 && (c & 0xC0) != 0x80) {
+            break;
+        }
+        out += c < 0x20 || std::strchr("<>:\"/\\|?*", c) ? '_' : static_cast<char>(c);
+    }
+    while (!out.empty() && (out.back() == ' ' || out.back() == '.')) {
+        out.pop_back();
+    }
+    return out.empty() ? otherwise : out;
+}
+
+// The game program's SHA-256, as the launcher's build identity has it (lowercase hex; empty: not known)
+std::string ProgramSha256() {
+    static std::string sum;
+    static bool done = false;
+    if (done) {
+        return sum;
+    }
+    done = true;
+#ifdef _WIN32
+    wchar_t self[MAX_PATH * 4];
+    const DWORD length = GetModuleFileNameW(nullptr, self, static_cast<DWORD>(std::size(self)));
+    if (length == 0 || length >= std::size(self)) {
+        return sum;
+    }
+    FILE *file = _wfopen(self, L"rb");
+    if (!file) {
+        return sum;
+    }
+    BCRYPT_ALG_HANDLE alg = nullptr;
+    BCRYPT_HASH_HANDLE hash = nullptr;
+    bool ok = BCryptOpenAlgorithmProvider(&alg, BCRYPT_SHA256_ALGORITHM, nullptr, 0) >= 0;
+    ok = ok && BCryptCreateHash(alg, &hash, nullptr, 0, nullptr, 0, 0) >= 0;
+    std::vector<unsigned char> buffer(1 << 16);
+    size_t got;
+    while (ok && (got = fread(buffer.data(), 1, buffer.size(), file)) > 0) {
+        ok = BCryptHashData(hash, buffer.data(), static_cast<ULONG>(got), 0) >= 0;
+    }
+    ok = ok && !ferror(file);
+    unsigned char digest[32] = {};
+    ok = ok && BCryptFinishHash(hash, digest, sizeof(digest), 0) >= 0;
+    if (hash) {
+        BCryptDestroyHash(hash);
+    }
+    if (alg) {
+        BCryptCloseAlgorithmProvider(alg, 0);
+    }
+    fclose(file);
+    if (ok) {
+        for (const unsigned char b : digest) {
+            sum += "0123456789abcdef"[b >> 4];
+            sum += "0123456789abcdef"[b & 15];
+        }
+    }
+#endif
+    return sum;
+}
+
+} // namespace
+
+void Port::RecordInput(const uint16_t pressed[]) {
+    // (local play only here: online play's GekkoNet session records its confirmed frames itself, Tommy's netplay
+    // and a replay played back record nothing)
+    if (opt.replayFolder.empty() || !opt.replayPlay.empty() || net || gekkoOnline) {
+        return;
+    }
+    // (the service and test switches are not in a replay's inputs: while one is on, nothing is recorded)
+    if (machine->serviceButton || machine->testSwitch) {
+        RecordEnd(false);
+        return;
+    }
+    if (recording && (frame != recordNext || FeatureSnapshot() != recordFeatures)) {
+        RecordEnd(frame == recordNext); // (a reset not seen as one, or the options changed: a replay ends there)
+    }
+    if (!recording) {
+        recording = NewReplay("local");
+        recording->info.players = {opt.nick.empty() ? "Player 1" : opt.nick, "Player 2"};
+        recordFrom = frame;
+        recordFeatures = FeatureSnapshot();
+    }
+    Replay::Pads pads = {pressed[0], pressed[1], pressed[2], pressed[3]};
+    const uint64_t at = frame - recordFrom;
+    if (recording->inputs.empty() || std::prev(recording->inputs.end())->second != pads) {
+        recording->inputs[at] = pads;
+    }
+    recordNext = frame + 1;
+}
+
+void Port::RecordRan() {
+    if (recording && frame == recordNext && (frame - recordFrom) % 60 == 0) {
+        recording->checks.emplace_back(frame - recordFrom, StateHash(true));
+    }
+}
+
+void Port::RecordEnd(bool stateIsLast) {
+    if (!recording) {
+        return;
+    }
+    std::unique_ptr<Replay> replay = std::move(recording);
+    const uint64_t frames = recordNext > recordFrom ? recordNext - recordFrom : 0;
+    if (frames < 60) {
+        return; // (under a second: nothing worth keeping)
+    }
+    replay->info.frames = frames;
+    if (stateIsLast && frame == recordNext && (replay->checks.empty() || replay->checks.back().first != frames)) {
+        replay->checks.emplace_back(frames, StateHash(true));
+    }
+    SaveReplay(*replay);
+}
+
+bool Port::StartReplay(std::string &error) {
+    auto replay = std::make_unique<Replay>();
+    std::string why;
+    if (!replay->Load(opt.replayPlay, why)) {
+        error = "This replay can't be played: " + why;
+        return false;
+    }
+    const Replay::Info &info = replay->info;
+    if (replay->backend != Replay::kBackendCps || info.game != GAME_ID) {
+        error = "This replay is of " + (info.title.empty() ? info.game : info.title) + ", not of " GAME_NAME ".";
+        return false;
+    }
+    const std::string build = ProgramSha256();
+    if (!info.build.empty() && !build.empty() && info.build != build) {
+        error = "This replay needs the build of " GAME_NAME " it was recorded with: this is another one.";
+        return false;
+    }
+    // The options it was recorded with, for this run only (settings.ini as it is), and online play's rules if it
+    // was online
+    std::stringstream list(info.features);
+    std::string one;
+    while (std::getline(list, one, ',')) {
+        const size_t eq = one.find('=');
+        if (eq != std::string::npos) {
+            SetFeatureForNow(one.substr(0, eq).c_str(), atoi(one.c_str() + eq + 1));
+        }
+    }
+    TheGame().online = info.online;
+    if (!LoadStateBytes(replay->state, why)) {
+        error = "This replay's starting state doesn't load in this build" + why + ".";
+        return false;
+    }
+    machine->audio.clear();
+    replayFrom = frame;
+    replayCheck = replayMatched = 0;
+    replayDrift.clear();
+    replayEnded = false;
+    if (opt.headless && opt.frames == 0) {
+        opt.frames = frame + info.frames;
+    }
+    fprintf(stderr, "replay: %s, %s, %s vs %s, %llu frames\n", info.started.c_str(), info.mode.c_str(),
+            info.players.empty() ? "?" : info.players[0].c_str(), info.players.size() > 1 ? info.players[1].c_str() : "?",
+            static_cast<unsigned long long>(info.frames));
+    replaying = std::move(replay);
+    return true;
+}
+
+void Port::ReplayInput(uint16_t pressed[]) {
+    // The players' controls, the coin and the switches ignored: the replay's inputs for this frame
+    const uint64_t at = frame - replayFrom;
+    Replay::Pads pads = {};
+    auto it = replaying->inputs.upper_bound(at);
+    if (it != replaying->inputs.begin()) {
+        pads = std::prev(it)->second;
+    }
+    for (int i = 0; i < Machine::kMaxPlayers && i < 4; i++) {
+        pressed[i] = i < replaying->players ? pads[i] : 0;
+    }
+    machine->serviceButton = false;
+    machine->testSwitch = false;
+}
+
+void Port::ReplayRan() {
+    const uint64_t at = frame - replayFrom;
+    const auto &checks = replaying->checks;
+    while (replayCheck < checks.size() && checks[replayCheck].first < at) {
+        replayCheck++;
+    }
+    if (replayCheck < checks.size() && checks[replayCheck].first == at) {
+        if (StateHash(true) == checks[replayCheck].second) {
+            replayMatched++;
+        } else if (replayDrift.empty()) {
+            const uint64_t seconds = static_cast<uint64_t>(at / Machine::kFramesPerSecond);
+            char when[32];
+            snprintf(when, sizeof(when), "%llu:%02llu", static_cast<unsigned long long>(seconds / 60),
+                     static_cast<unsigned long long>(seconds % 60));
+            replayDrift = std::string("no longer matches from ") + when;
+            fprintf(stderr, "replay: %s (frame %llu)\n", replayDrift.c_str(), static_cast<unsigned long long>(at));
+        }
+        replayCheck++;
+    }
+    if (!replayEnded && at >= replaying->info.frames) {
+        replayEnded = true;
+        if (!opt.headless) {
+            paused = true; // (the last frame held: Esc leaves)
+        }
+    }
+}
+
+std::unique_ptr<Replay> Port::NewReplay(const char *mode) {
+    auto replay = std::make_unique<Replay>();
+    replay->state = StateBytes();
+    replay->players = 2;
+    Replay::Info &info = replay->info;
+    info.game = GAME_ID;
+    info.title = GAME_NAME;
+    info.build = ProgramSha256();
+    info.forkade = CPS2RECOMP_VERSION;
+    info.mode = mode;
+    info.started = LocalTimeText(std::time(nullptr), false);
+    info.features = FeatureText();
+    info.online = TheGame().online;
+    return replay;
+}
+
+void Port::SaveReplay(Replay &replay) {
+    const uint64_t frames = replay.info.frames;
+    if (opt.replayFolder.empty()) {
+        return;
+    }
+    // YYYY-MM-DD_HH-MM-SS_<game>_<P1>-vs-<P2>.fareplay, a number added if there is one so, written whole as .part
+    // first and then given its name
+    std::error_code ignored;
+    const std::filesystem::path folder(std::u8string(reinterpret_cast<const char8_t *>(opt.replayFolder.c_str())));
+    std::filesystem::create_directories(folder, ignored);
+    std::string stamp = replay.info.started.substr(0, 19);
+    for (char &c : stamp) {
+        c = c == 'T' ? '_' : c == ':' ? '-' : c;
+    }
+    const std::string base = stamp + "_" + GAME_ID + "_" + FileSafe(replay.info.players.empty() ? "" : replay.info.players[0], "P1") +
+                             "-vs-" + FileSafe(replay.info.players.size() > 1 ? replay.info.players[1] : "", "P2");
+    const auto pathOf = [&](int n) {
+        const std::string name = base + (n > 1 ? "-" + std::to_string(n) : std::string()) + ".fareplay";
+        return folder / std::filesystem::path(std::u8string(reinterpret_cast<const char8_t *>(name.c_str())));
+    };
+    int n = 1;
+    while (std::filesystem::exists(pathOf(n), ignored) && n < 1000) {
+        n++;
+    }
+    const std::filesystem::path path = pathOf(n);
+    std::filesystem::path part = path;
+    part += ".part";
+    const auto utf8 = [](const std::filesystem::path &p) {
+        const std::u8string text = p.u8string();
+        return std::string(reinterpret_cast<const char *>(text.data()), text.size());
+    };
+    std::string error;
+    if (!std::filesystem::is_directory(folder, ignored)) {
+        replayNote = "Couldn't save the replay: the folder " + opt.replayFolder + " can't be made";
+        menu.Note(replayNote);
+        return;
+    }
+    if (!replay.Save(utf8(part), error)) {
+        replayNote = "Couldn't save the replay: " + error;
+        menu.Note(replayNote);
+        return;
+    }
+    std::error_code renamed;
+    std::filesystem::rename(part, path, renamed);
+    if (renamed) {
+        replayNote = "Couldn't save the replay: " + renamed.message() + " (it is kept as " + utf8(part) + ")";
+        menu.Note(replayNote);
+        return;
+    }
+    replayNote.clear();
+    fprintf(stderr, "replay: %s (%llu frames)\n", utf8(path).c_str(), static_cast<unsigned long long>(frames));
 }
 
 std::string Port::StatePicture(const std::string &statePath) {
@@ -2010,11 +2394,22 @@ bool Port::Screenshot(std::string &file, std::string &error) const {
 }
 
 bool Port::LoadState(const std::string &path, std::string &error) {
+    RecordEnd();
     std::vector<uint8_t> data;
     if (!ReadFile(path, data)) {
         error = "cannot read " + path;
         return false;
     }
+    if (!LoadStateBytes(data, error)) {
+        error = path + error;
+        return false;
+    }
+    return true;
+}
+
+bool Port::LoadStateBytes(const std::vector<uint8_t> &bytes, std::string &error) {
+    std::vector<uint8_t> data = bytes;
+    const std::string path; // (LoadState puts the file's name before the reason)
     Archive ar(data, false);
     ar.Mark(0x43505332);
     uint32_t version = 0;
@@ -2989,6 +3384,10 @@ void Port::RunFrame() {
     if (!net && AtFrame(opt.stateLoad, frame, path) && !LoadState(path, error)) {
         fprintf(stderr, "%s\n", error.c_str());
     }
+    if (replaying) {
+        ReplayInput(pressed);
+    }
+    RecordInput(pressed);
     if (net && connecting) {
         Step(pressed); // (--net-arcade: the host playing while it waits)
         cameIn = cameIn || (pressed[0] & kStart);
@@ -3079,6 +3478,10 @@ void Port::RunFrame() {
     if (hashFile && !opt.rollbackTest && !net) { // (RollbackFrame and online play log a frame when it is confirmed)
         fprintf(hashFile, "%llu %08x\n", static_cast<unsigned long long>(frame), StateHash());
     }
+    RecordRan();
+    if (replaying) {
+        ReplayRan();
+    }
     if (!net) {
         memcpy(machine->players, pressed, sizeof(pressed));
         RunAhead();
@@ -3131,6 +3534,14 @@ void Port::KeepVolume() const {
 }
 
 void Port::Finish() {
+    RecordEnd();
+    if (replaying) {
+        fprintf(stderr, "replay: %s; %zu of %zu checkpoints matched%s\n", replayEnded ? "played to its end" : "left before its end",
+                replayMatched, replaying->checks.size(), replayDrift.empty() ? "" : (", " + replayDrift).c_str());
+    }
+    if (!replayNote.empty()) {
+        fprintf(stderr, "%s\n", replayNote.c_str());
+    }
     WriteCalls();
     guest_stages::Report(stderr);
     if (g_callOrder) {
@@ -3161,7 +3572,8 @@ void Port::Finish() {
     if (!opt.movieRecord.empty()) {
         recMovie.Save(opt.movieRecord);
     }
-    if (!opt.eepromPath.empty() && machine->eeprom.changed && !opt.online && opt.gekko.mode == OnlineOptions::Mode::Off) {
+    if (!opt.eepromPath.empty() && machine->eeprom.changed && !opt.online && opt.gekko.mode == OnlineOptions::Mode::Off &&
+        opt.replayPlay.empty()) {
         WriteFile(opt.eepromPath, machine->eeprom.words, sizeof(machine->eeprom.words));
     }
     if (!opt.recordEntries.empty()) {
@@ -3484,6 +3896,10 @@ bool ParseArgs(int argc, char **argv, port::Options &o) {
             o.cpuSpeed = atoi(next());
         } else if (a == "--movie") {
             o.moviePlay = next();
+        } else if (a == "--replay-folder") {
+            o.replayFolder = next();
+        } else if (a == "--replay") {
+            o.replayPlay = next();
         } else if (a == "--record") {
             o.movieRecord = next();
         } else if (a == "--auto") {
@@ -3813,6 +4229,10 @@ int main(int argc, char **argv) {
             }
         }
         return 0;
+    }
+    if (!p.opt.replayPlay.empty() && !p.StartReplay(error)) {
+        SayFailed(p.opt, error);
+        return 6;
     }
     if (p.opt.online && !p.StartOnline(error)) {
         SayFailed(p.opt, error);

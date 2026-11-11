@@ -25,6 +25,7 @@
 
 #include "match_flow.h"
 #include "recovery.h"
+#include "replay.h"
 #include <cstdint>
 #include <cstdio>
 #include <memory>
@@ -128,6 +129,17 @@ private:
     bool CreateSpectateSession();
     void UpdateFlowMessage();
     bool CreateGameSession();
+    // (this fork, native-replays) The replay of this GekkoNet session (--replay-folder): GekkoNet records the session's
+    // confirmed inputs; ReplayAdvance keeps the state it began from, each frame's inputs as it was last run and the
+    // checksums every 60 frames; ReplayEnd takes the confirmed inputs, keeps the frames whose last run had them, and
+    // saves it (before the session goes: the match ended, left, or a reconnection's new start)
+    std::unique_ptr<Replay> m_replay;
+    std::vector<uint32_t> m_replayRan;          // (GekkoNet's frame -> both players' inputs as last run)
+    std::map<uint64_t, uint32_t> m_replayChecks; // (frames run -> the checksum then)
+    unsigned int m_replayBase = 0;               // (the recording's length with no frame in it)
+    void ReplayBegin();
+    void ReplayAdvance(int frame, const uint16_t players[2], bool before);
+    void ReplayEnd();
     void SendControl(char kind,uint64_t epoch);
     void PrepareRecovery();
     void RequestRecovery();

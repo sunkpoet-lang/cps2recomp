@@ -24,6 +24,8 @@
 #include <string>
 #include <vector>
 
+#include "replay.h"
+
 namespace port {
 
 struct Options {
@@ -35,6 +37,8 @@ struct Options {
     std::string movieRecord;   // input movie to write
     std::string shotPrefix;    // PNG prefix for --shot-every
     std::string hashLog;       // per-frame state hash log
+    std::string replayFolder;  // (this fork, native-replays) --replay-folder DIR: each session saved there as a .fareplay (none: nothing recorded)
+    std::string replayPlay;    // --replay FILE: a .fareplay played back
     std::string recordEntries; // entries file to add to (tools/recomp.py reads it)
     std::string dumpProgram;   // write the deciphered program here and stop
     std::string audioDump;     // WAV file of the sound (headless)
@@ -349,7 +353,37 @@ struct Port {
     uint64_t soundTestState = 0;
     uint16_t soundTestSong = 0;
     void Finish();
-    uint32_t StateHash() const;
+    // (this fork, native-replays) The session recorded as a replay (--replay-folder, replay.h). RecordInput: before a
+    // frame runs, with the controls it runs with; RecordRan: after it. RecordEnd saves what was recorded (at a reset,
+    // a state loaded, the game's options changed, and at quitting; `stateIsLast`: the machine is still as the last
+    // recorded frame left it, so its checksum is kept too), and the next frame begins another.
+    std::unique_ptr<Replay> recording;
+    uint64_t recordFrom = 0, recordNext = 0;
+    std::vector<int> recordFeatures;
+    std::string replayNote; // (what became of the last save: said at the end)
+    void RecordInput(const uint16_t pressed[]);
+    void RecordRan();
+    void RecordEnd(bool stateIsLast = true);
+    // A replay begun with what every one says (the game, its build, the date, the options) and the state now; and one
+    // saved in the replay folder under its name (replayNote: what became of it)
+    std::unique_ptr<Replay> NewReplay(const char *mode);
+    void SaveReplay(Replay &replay);
+    // (the save state's bytes, as SaveState writes them, and put back)
+    std::vector<uint8_t> StateBytes();
+    bool LoadStateBytes(const std::vector<uint8_t> &data, std::string &error);
+    // --replay FILE: the replay played (StartReplay: refused for another game or build, with the reason; its state
+    // and options set), its inputs in place of the players' controls frame by frame, and its checksums compared
+    // (replayDrift: where it stopped matching, said on the screen; replayEnded: played to its end)
+    std::unique_ptr<Replay> replaying;
+    uint64_t replayFrom = 0;
+    size_t replayCheck = 0, replayMatched = 0;
+    std::string replayDrift;
+    bool replayEnded = false;
+    bool StartReplay(std::string &error);
+    void ReplayInput(uint16_t pressed[]);
+    void ReplayRan();
+    // replay: the fingerprint a replay keeps, the same whatever the player's picture and sound (online play's)
+    uint32_t StateHash(bool replay = false) const;
     bool SaveState(const std::string &path, std::string &error);
     bool LoadState(const std::string &path, std::string &error);
 };

@@ -532,6 +532,7 @@ void Online::Stop() {
     }
     if(m_checkpointLog){std::fclose(m_checkpointLog);m_checkpointLog=nullptr;}
     if(m_flowLog){std::fclose(m_flowLog);m_flowLog=nullptr;}
+    ReplayEnd();
     if (m_session) {
         gekko_destroy(&m_session);
     }
@@ -615,6 +616,7 @@ bool Online::Start(Port &port, const OnlineOptions &options, std::string &error)
         gekko_start(m_session, &config);
         m_local = gekko_add_actor(m_session, GekkoLocalPlayer, nullptr);
         m_remote = gekko_add_actor(m_session, GekkoLocalPlayer, nullptr);
+        ReplayBegin();
         gekko_set_local_delay(m_session, m_local, static_cast<unsigned char>(m_options.delay));
         gekko_set_local_delay(m_session, m_remote, static_cast<unsigned char>(m_options.delay));
         m_status = Status::Playing;
@@ -711,7 +713,115 @@ bool Online::CreateGameSession() {
     if(ChatHost()) {m_local=gekko_add_actor(m_session,GekkoLocalPlayer,nullptr);m_remote=gekko_add_actor(m_session,GekkoRemotePlayer,&peer);}
     else {m_remote=gekko_add_actor(m_session,GekkoRemotePlayer,&peer);m_local=gekko_add_actor(m_session,GekkoLocalPlayer,nullptr);}
     gekko_set_local_delay(m_session,m_local,static_cast<unsigned char>(m_options.delay));
-    return m_local>=0 && m_remote>=0;
+    if(m_local<0 || m_remote<0)return false;
+    ReplayBegin();
+    return true;
+}
+
+// (this fork, native-replays)
+void Online::ReplayBegin() {
+    m_replay.reset();
+    m_replayRan.clear();
+    m_replayChecks.clear();
+    m_replayBase = 0;
+    if (!m_session || !m_port || m_port->opt.replayFolder.empty() || !m_port->opt.replayPlay.empty() || Spectating()) {
+        return;
+    }
+    // (no state of GekkoNet's own, nor its packing: only the inputs it confirms, read back at the end)
+    if (!gekko_start_recording(m_session, false, true)) {
+        fprintf(stderr, "online: replay: GekkoNet does not record this session\n");
+        return;
+    }
+    gekko_peek_recording(m_session, &m_replayBase);
+}
+
+void Online::ReplayAdvance(int frame, const uint16_t players[2], bool before) {
+    if (!m_replayBase || frame < 0) {
+        return;
+    }
+    const size_t at = static_cast<size_t>(frame);
+    if (before) {
+        // The state the session began from: the board before its first frame ran
+        if (!m_replay && at == 0) {
+            m_replay = m_port->NewReplay("online");
+        }
+        if (m_replayRan.size() <= at) {
+            m_replayRan.resize(at + 1);
+        }
+        m_replayRan[at] = static_cast<uint32_t>(players[0]) | static_cast<uint32_t>(players[1]) << 16;
+        return;
+    }
+    if ((at + 1) % 60 == 0) {
+        m_replayChecks[at + 1] = m_port->StateHash(true);
+    }
+}
+
+void Online::ReplayEnd() {
+    if (!m_session || !m_replayBase) {
+        m_replay.reset();
+        return;
+    }
+    unsigned int length = 0;
+    const unsigned char *data = gekko_stop_recording(m_session, &length);
+    const unsigned int base = m_replayBase;
+    m_replayBase = 0;
+    std::unique_ptr<Replay> replay = std::move(m_replay);
+    if (!replay || !data) {
+        return;
+    }
+    // GekkoNet's recording, as it serializes it unpacked and with nothing else kept: ..., the inputs (their length,
+    // uint32, then each frame's players' inputs), then four empty fields (16 bytes: no state, no checksum interval,
+    // no checksums, no user data). Its length less the length with no frames is the inputs' bytes.
+    constexpr unsigned int kBlock = 2 * sizeof(uint16_t);
+    const unsigned int bytes = length >= base ? length - base : 0;
+    if (bytes % kBlock != 0 || length < bytes + 20) {
+        fprintf(stderr, "online: replay: GekkoNet's recording is not as expected (%u bytes, %u at the start)\n", length, base);
+        return;
+    }
+    const unsigned char *inputs = data + length - 16 - bytes;
+    const uint32_t said = inputs[-4] | inputs[-3] << 8 | inputs[-2] << 16 | static_cast<uint32_t>(inputs[-1]) << 24;
+    bool tail = true;
+    for (unsigned int i = length - 16; i < length; i++) {
+        tail = tail && data[i] == 0;
+    }
+    if (said != bytes || !tail) {
+        fprintf(stderr, "online: replay: GekkoNet's recording is not as expected (inputs %u, said %u)\n", bytes, said);
+        return;
+    }
+    // The confirmed frames, as far as each one's last run had its confirmed inputs (a rollback still owed at the
+    // end: the frames from there are left out)
+    const size_t confirmed = bytes / kBlock;
+    size_t frames = 0;
+    Replay::Pads last = {0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF};
+    for (; frames < confirmed && frames < m_replayRan.size(); frames++) {
+        const unsigned char *one = inputs + frames * kBlock;
+        const uint32_t both = static_cast<uint32_t>(one[0] | one[1] << 8) | static_cast<uint32_t>(one[2] | one[3] << 8) << 16;
+        if (both != m_replayRan[frames]) {
+            break;
+        }
+        const Replay::Pads pads = {static_cast<uint16_t>(both & 0xFFFF), static_cast<uint16_t>(both >> 16), 0, 0};
+        if (pads != last) {
+            replay->inputs[frames] = pads;
+            last = pads;
+        }
+    }
+    if (frames < 60) {
+        return; // (under a second: nothing worth keeping)
+    }
+    for (const auto &[at, hash] : m_replayChecks) {
+        if (at <= frames) {
+            replay->checks.emplace_back(at, hash);
+        }
+    }
+    replay->info.frames = frames;
+    const bool host = m_options.mode != OnlineOptions::Mode::Join;
+    replay->info.role = m_options.mode == OnlineOptions::Mode::Stress ? "stress" : host ? "host" : "guest";
+    const std::string mine = m_options.name.empty() ? "Player" : m_options.name;
+    const std::string theirs = m_theirName.empty() ? "Player" : m_theirName;
+    replay->info.players = m_options.mode == OnlineOptions::Mode::Stress ? std::vector<std::string>{mine, mine}
+                           : host ? std::vector<std::string>{mine, theirs} : std::vector<std::string>{theirs, mine};
+    fprintf(stderr, "online: replay: %zu of %zu confirmed frames (%zu run)\n", frames, confirmed, m_replayRan.size());
+    m_port->SaveReplay(*replay);
 }
 
 // (this fork) A spectator's session: the host as its one remote actor, the confirmed inputs it sends
@@ -874,6 +984,7 @@ void Online::SendControl(char kind,uint64_t epoch) {
 void Online::PrepareRecovery() {
     if(m_prepared)return;
     // Outside all SDK event iterations: keep socket, peer and reliable chat channel.
+    ReplayEnd();
     if(m_session)gekko_destroy(&m_session);
     m_socket->forGekko.clear();m_socket->forGekkoFrom.clear();m_socket->forChat.clear();
     for(Spectator& one:m_spectators)one.handle=-1; // (this fork: re-added when the new session runs)
@@ -891,6 +1002,7 @@ void Online::RequestRecovery() {
 }
 
 bool Online::ResetRecoveryEpoch() {
+    ReplayEnd();
     if(m_session)gekko_destroy(&m_session);
     if(!LoadFrom(m_arcadeState,*m_port->machine)){End("The initial recovery state could not be restored",true);return false;}
     m_socket->forGekko.clear();m_socket->forGekkoFrom.clear();m_socket->forChat.clear();
@@ -1255,7 +1367,13 @@ void Online::Run() {
             // A frame run again (or ahead) is neither seen nor heard: its sound is dropped
             const bool again = event->data.adv.rolling_back || event->data.adv.running_ahead;
             const size_t heard = machine.audio.size();
+            if (!event->data.adv.running_ahead) {
+                ReplayAdvance(event->data.adv.frame, players, true);
+            }
             m_port->RunOnlineFrame(players, again);
+            if (!event->data.adv.running_ahead) {
+                ReplayAdvance(event->data.adv.frame, players, false);
+            }
             if(m_options.matchFlow && !Spectating() && !event->data.adv.running_ahead) {
                 const bool before=m_port->cameIn;
                 const auto result = TheGame().onlineMatchResult;
