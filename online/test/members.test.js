@@ -185,3 +185,33 @@ test("the pages are answered with CORS for their origin only", async () => {
   assert.equal(pre.status, 204);
   assert.equal(pre.headers.get("access-control-allow-origin"), "https://pages.test");
 });
+
+test("the first administrator chooses a nickname with no approval to wait for", async () => {
+  const discord = fakeDiscord();
+  try {
+    const { call } = service(env);
+    const admin = await webSession(call, ADMIN);
+    const before = await (await call("POST", "/v1/members/me", { session: admin })).json();
+    assert.equal(before.role, "admin");
+    assert.equal(before.nickname, "");
+    const said = await call("POST", "/v1/members/request", { session: admin, nickname: "DANNY", flag: "MX" });
+    assert.equal(said.status, 200);
+    const body = await said.json();
+    assert.equal(body.member, true);
+    assert.equal(body.nickname, "DANNY");
+    const after = await (await call("POST", "/v1/members/me", { session: admin })).json();
+    assert.deepEqual([after.nickname, after.flag, after.role], ["DANNY", "MX", "admin"]);
+    // (and once chosen, it can't be asked again)
+    assert.equal((await call("POST", "/v1/members/request", { session: admin, nickname: "OTHER", flag: "MX" })).status, 409);
+    const log = await (await call("POST", "/v1/admin/log", { session: admin })).json();
+    assert.ok(JSON.stringify(log).includes("joined"));
+    // (listed as the administrator, fixed: not changed or revoked from the admin page)
+    const list = await (await call("POST", "/v1/admin/list", { session: admin })).json();
+    const me = list.members.find((m) => m.id === ADMIN);
+    assert.deepEqual([me.role, me.fixed], ["admin", true]);
+    assert.equal((await call("POST", "/v1/admin/role", { session: admin, id: ADMIN, role: "member" })).status, 409);
+    assert.equal((await call("POST", "/v1/admin/revoke", { session: admin, id: ADMIN })).status, 409);
+  } finally {
+    discord.restore();
+  }
+});

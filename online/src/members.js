@@ -89,8 +89,12 @@ export class Members {
     d.log = d.log.filter((entry) => now - entry.at < kLogLife);
   }
 
+  isFirstAdmin(id) {
+    return Boolean(this.env && this.env.ADMIN_DISCORD_ID && id === this.env.ADMIN_DISCORD_ID);
+  }
+
   roleOf(d, id) {
-    if (this.env && this.env.ADMIN_DISCORD_ID && id === this.env.ADMIN_DISCORD_ID) {
+    if (this.isFirstAdmin(id)) {
       return "admin";
     }
     return d.members[id] ? d.members[id].role : "";
@@ -225,6 +229,14 @@ export class Members {
         if (this.nicknameTaken(d, nickname, s.id)) {
           return done({ error: "That nickname is taken" }, 409);
         }
+        // (the first administrator, named by ADMIN_DISCORD_ID, is one before having a nickname: theirs is taken as
+        // asked, with no approval to wait for)
+        if (this.roleOf(d, s.id) === "admin") {
+          d.members[s.id] = { nickname, flag, role: "member", joined: now };
+          delete d.requests[s.id];
+          log(s.id, "joined", s.id, nickname);
+          return done({ request: "", member: true, ...this.profile(d, s.id) });
+        }
         d.requests[s.id] = { nickname, flag, asked: now };
         return done({ request: "pending" });
       }
@@ -244,8 +256,13 @@ export class Members {
         if (url.pathname === "/admin/list") {
           return done({
             requests: Object.entries(d.requests).map(([id, r]) => ({ id, ...r })),
-            members: Object.entries(d.members).map(([id, m]) => ({ id, ...m })),
+            // (the role each has in effect; `fixed`: the first administrator, named by ADMIN_DISCORD_ID)
+            members: Object.entries(d.members).map(([id, m]) => ({ id, ...m, role: this.roleOf(d, id), fixed: this.isFirstAdmin(id) })),
           });
+        }
+        // (the first administrator's role and membership come from the settings: not changed or revoked from here)
+        if ((url.pathname === "/admin/role" || url.pathname === "/admin/revoke") && this.isFirstAdmin(who)) {
+          return done({ error: "The first administrator is set in the service's settings" }, 409);
         }
         if (url.pathname === "/admin/log") {
           return done({ log: d.log });

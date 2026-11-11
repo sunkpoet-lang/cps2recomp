@@ -12,22 +12,44 @@ import path from "node:path";
 import worker from "../src/index.js";
 import { service } from "../test/fake.js";
 
-const port = Number(process.argv[2]) || 8787;
-const site = path.resolve(process.argv[3] || "D:/CPS2/ForkAde/site");
+// --real-discord: Discord itself instead of the fake one, with the app's id, its secret and the first administrator's
+// id read from online/.dev.vars (which git ignores; .dev.vars.example says what goes there). The app must have
+// http://127.0.0.1:PORT/v1/auth/discord/callback among its redirects.
+const real = process.argv.includes("--real-discord");
+const args = process.argv.slice(2).filter((a) => a !== "--real-discord");
+const port = Number(args[0]) || 8787;
+const site = path.resolve(args[1] || "D:/CPS2/ForkAde/site");
 const base = `http://127.0.0.1:${port}`;
-const ADMIN = "100000000000000001";
+function devVars() {
+  const file = path.join(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1")), "..", ".dev.vars");
+  const vars = {};
+  for (const line of fs.readFileSync(file, "utf8").split(/\r?\n/)) {
+    const m = line.match(/^\s*([A-Z_]+)\s*=\s*(.*?)\s*$/);
+    if (m) {
+      vars[m[1]] = m[2];
+    }
+  }
+  for (const name of ["DISCORD_CLIENT_ID", "DISCORD_CLIENT_SECRET", "ADMIN_DISCORD_ID"]) {
+    if (!/^[A-Za-z0-9_-]{8,}$/.test(vars[name] || "") || /^0+$/.test(vars[name]) || vars[name] === "not-a-real-secret") {
+      throw new Error(`online/.dev.vars: ${name} is missing or still the example's`);
+    }
+  }
+  return vars;
+}
+const vars = real ? devVars() : {};
+const ADMIN = real ? vars.ADMIN_DISCORD_ID : "100000000000000001";
 const { env } = service({
   ADMIN_DISCORD_ID: ADMIN,
-  DISCORD_CLIENT_ID: "dev",
-  DISCORD_CLIENT_SECRET: "dev",
+  DISCORD_CLIENT_ID: real ? vars.DISCORD_CLIENT_ID : "dev",
+  DISCORD_CLIENT_SECRET: real ? vars.DISCORD_CLIENT_SECRET : "dev",
   PUBLIC_URL: base,
   PAGES_ORIGIN: base,
   PAGES_URL: `${base}/site/join.html`,
   PAGES_ADMIN_URL: `${base}/site/admin.html`,
-  DISCORD_AUTHORIZE_URL: `${base}/fake-discord/authorize`,
-  DISCORD_API: `${base}/fake-discord/api`,
+  ...(real ? {} : { DISCORD_AUTHORIZE_URL: `${base}/fake-discord/authorize`, DISCORD_API: `${base}/fake-discord/api` }),
   LIMITS: "log",
 });
+console.log(real ? "Discord: the real one (online/.dev.vars)" : "Discord: the fake one (--real-discord for the real one)");
 const ctx = { waitUntil: () => {} };
 
 // (the fake Discord's API, answered in this process: a code "code-<id>" is that id)
