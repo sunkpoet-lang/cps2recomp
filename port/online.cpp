@@ -96,7 +96,7 @@ namespace {
         for (const cps2recomp::Feature &feature : TheGame().features) {
             const bool own = !strcmp(feature.category, "Display") && strncmp(feature.name, "widescreen", 10) != 0;
             // ((this fork) Mute spectators: what each player sees, never part of the match)
-            if (own || cps2recomp::OnlineOff(feature.name) || !strcmp(feature.name, "online_mute_spectators")) {
+            if (own || cps2recomp::OnlineOff(feature.name)) {
                 continue;
             }
             list.push_back(std::string(feature.name) + "=" + std::to_string(matchFlow && !strcmp(feature.name,"online_hide_names") ? 0 : cps2recomp::FeatureSetting(feature.name)));
@@ -1069,18 +1069,7 @@ void Online::Pump() {
         }
     }
     m_socket->forRelay.clear();
-    for (const auto &[name, kind, payload] : m_socket->fromWatchers) {
-        for (Spectator &one : m_spectators) {
-            if (one.name != name) {
-                continue;
-            }
-            if (kind == 'U') {
-                one.relay->Receive(kind, payload.data(), payload.size(), NowMs());
-            } else {
-                one.own->Receive(kind, payload.data(), payload.size(), NowMs());
-            }
-        }
-    }
+    // (match-spectators 7.1) a spectator's chat is ignored: not received, acknowledged, shown, relayed or logged
     m_socket->fromWatchers.clear();
 }
 
@@ -1373,10 +1362,7 @@ ChatLink::Said Online::ChatSay(const std::string &text, std::string &line) {
     if(m_options.matchFlow && Recovering())return Said::Wait;
     switch (m_chat ? m_chat->Say(text, NowMs(), &line) : recomp::chat::Channel::Said::Empty) {
     case recomp::chat::Channel::Said::Sent:
-        if (ChatHost()) {
-            RelayLine(0, ChatName(0), line, ""); // (this fork: the host's line to the spectators too)
-        }
-        return Said::Sent;
+        return Said::Sent;  // (match-spectators 7.1: to the other player only; spectators get no chat)
     case recomp::chat::Channel::Said::Wait: return Said::Wait;
     default: return Said::Empty;
     }
@@ -1395,25 +1381,14 @@ std::vector<ChatLink::Heard> Online::ChatHeardLines() {
     std::vector<Heard> lines;
     if (m_chat) {
         for (std::string &text : m_chat->TakeHeard()) {
-            if (ChatHost()) {
-                RelayLine(1, ChatName(1), text, "");
-            }
             lines.push_back({"", std::move(text), false});
         }
     }
-    if (ChatHost()) {
-        for (Spectator &one : m_spectators) {
-            for (std::string &text : one.own->TakeHeard()) {
-                const std::string name = one.nick.empty() ? "Spectator" : one.nick;
-                RelayLine(2, name, text, one.name);
-                lines.push_back({name, std::move(text), true});
-            }
-        }
-    } else if (m_relay) {
-        for (ChatRelay::Line &one : m_relay->Take()) {
-            lines.push_back({one.name.empty() ? (one.role == 2 ? "Spectator" : one.role == 0 ? "Player 1" : "Player 2") : one.name,
-                             std::move(one.text), one.role == 2});
-        }
+    // (match-spectators 7.1, 11 November 2026: the in-game chat is the players'. The host relays nothing to spectators
+    // and takes nothing from them, and a relay's lines from a host are not shown. The messages' role and origin fields
+    // stay, for a later game with more than two players)
+    if (m_relay) {
+        m_relay->Take();
     }
     return lines;
 }

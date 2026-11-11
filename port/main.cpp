@@ -594,12 +594,6 @@ void RegisterPortFeatures() {
                                   "During an online match, each player's name is under their life bar (the name each gave on "
                                   "the launcher's Online page): this hides them.",
                                   0});
-    // (this fork: spectators, openspec change match-spectators)
-    TheGame().features.push_back({"online_mute_spectators", "Online", "Mute spectators",
-                                  "During an online match people are watching, their chat lines are not shown to you (they are "
-                                  "still in the match's chat log). Only your screen: the other player and the spectators still "
-                                  "see them.",
-                                  0});
     TheGame().features.push_back({"online_delay", "Online", "Input delay",
                                   "During an online match, how many frames each player's own controls are held back, at the bottom "
                                   "of the picture (\"DELAY 2\"): the host chooses it.",
@@ -2436,8 +2430,7 @@ bool Port::Say() {
     }
     if (said == ChatLink::Said::Sent) {
         const std::string name = ChatShownName(*link, link->ChatLocal());
-        // ((this fork) a spectator's own lines marked as theirs are on the others' screens)
-        chat.push_back({(link->ChatSpectating() ? "(spec) " : "") + name + ": " + line, tick + kChatTicks, true});
+        chat.push_back({name + ": " + line, tick + kChatTicks, true});
         chatHistory.push_back({recomp::chat::LocalTime().substr(11, 8), name, line, true, true});
         if (chatLog) {
             chatLog->Sent(name, line);
@@ -2448,18 +2441,16 @@ bool Port::Say() {
 
 void Port::HearChat() {
     if (ChatLink *link = Chat()) {
-        // ((this fork) each line with who said it: the other player, or with spectators, whoever; a spectator's
-        // marked "(spec)", and hidden from this player's screen with Mute spectators, still logged)
+        // ((this fork) each line with who said it: the other player; match-spectators 7.1, only players' lines come)
         for (const ChatLink::Heard &heard : link->ChatHeardLines()) {
-            const std::string name = heard.name.empty() ? ChatShownName(*link, 1 - link->ChatLocal()) : heard.name;
-            const std::string &line = heard.text;
-            const std::string shown = (heard.spectator ? "(spec) " : "") + name;
-            const bool muted = heard.spectator && !link->ChatSpectating() && FeatureOn("online_mute_spectators");
-            fprintf(stderr, "online: chat: %s%s: %s\n", muted ? "(muted) " : "", shown.c_str(), line.c_str());
-            if (!muted) {
-                chat.push_back({shown + ": " + line, tick + kChatTicks, false});
-                chatHistory.push_back({recomp::chat::LocalTime().substr(11, 8), shown, line, false, true});
+            if (heard.spectator) {
+                continue;  // (none should come: the host drops spectators' chat; a stray one is not shown or logged)
             }
+            const std::string shown = heard.name.empty() ? ChatShownName(*link, 1 - link->ChatLocal()) : heard.name;
+            const std::string &line = heard.text;
+            fprintf(stderr, "online: chat: %s: %s\n", shown.c_str(), line.c_str());
+            chat.push_back({shown + ": " + line, tick + kChatTicks, false});
+            chatHistory.push_back({recomp::chat::LocalTime().substr(11, 8), shown, line, false, true});
             if (chatLog) {
                 chatLog->Received(shown, line);
             }
@@ -2481,7 +2472,9 @@ ChatLink *Port::Chat() const {
     if (net) {
         return connecting || !net->ChatReady() ? nullptr : net.get();
     }
-    return gekkoChat && gekkoChat->ChatReady() ? gekkoChat : nullptr;
+    // (this fork, match-spectators 7.2) the in-game chat is the players': a spectator's game has none (no key, no box,
+    // no lines, no menu entry)
+    return gekkoChat && gekkoChat->ChatReady() && !gekkoChat->ChatSpectating() ? gekkoChat : nullptr;
 }
 
 std::string Port::ChatShownName(const ChatLink &link, int player) const {
