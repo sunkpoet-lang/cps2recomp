@@ -208,3 +208,21 @@ test("the game being played: a short id only, with playing only (community-three
     restore();
   }
 });
+
+test("the watch id: only in its shape, with a game being played (match-spectators 6.4)", async () => {
+  const restore = fakeDiscord();
+  try {
+    const l = await lobby([["FI3RO", "MX"], ["HOKUTO", "BR"]]);
+    const a = await l.connect("FI3RO"), b = await l.connect("HOKUTO");
+    const hokuto = () => a.events("presence").at(-1).presence.find((p) => p.nickname === "HOKUTO");
+    await b.say({ type: "state", state: "playing", game: "ssf2t", watch: "fmi23mdkp4bwahxj" });
+    assert.deepEqual([hokuto().game, hokuto().watch], ["ssf2t", "fmi23mdkp4bwahxj"]);
+    // (markup, a join code, no game: no watch id passed on)
+    for (const [watch, game] of [["<b>x</b>", "ssf2t"], ["2EV2CE", "ssf2t"], ["fmi23mdkp4bwahxj", undefined]]) {
+      await b.say({ type: "state", state: "playing", game, watch });
+      assert.equal(hokuto().watch, undefined);
+    }
+  } finally {
+    restore();
+  }
+});

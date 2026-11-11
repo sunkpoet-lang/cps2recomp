@@ -93,7 +93,8 @@ export class Community {
       }
       const w = this.who(ws);
       if (w.id && !seen.has(w.id)) {
-        seen.set(w.id, { nickname: w.nickname, flag: w.flag, role: w.role, state: w.state || "lobby", ...(w.game ? { game: w.game } : {}) });
+        seen.set(w.id, { nickname: w.nickname, flag: w.flag, role: w.role, state: w.state || "lobby", ...(w.game ? { game: w.game } : {}),
+                        ...(w.watch ? { watch: w.watch } : {}) });
       }
     }
     return [...seen.values()].sort((a, b) => a.nickname.localeCompare(b.nickname));
@@ -238,9 +239,12 @@ export class Community {
       const state = ["lobby", "playing", "watching"].includes(event.state) ? event.state : "lobby";
       // (community-three-panel-layout: the game being played, a short id only; anything else is no game)
       const game = state === "playing" && typeof event.game === "string" && /^[a-z0-9_]{1,24}$/.test(event.game) ? event.game : "";
+      // (match-spectators 6.4: the match's watch id, from the match service, so that others can watch from here; only
+      // with a game being played, and only in its shape: never a code)
+      const watch = game && typeof event.watch === "string" && /^[a-z2-7]{16}$/.test(event.watch) ? event.watch : "";
       for (const s of this.sockets()) {
         if (this.who(s).id === me.id) {
-          s.serializeAttachment({ ...this.who(s), state, game });
+          s.serializeAttachment({ ...this.who(s), state, game, watch });
         }
       }
       this.broadcast({ type: "presence", presence: this.presence() });
