@@ -713,6 +713,18 @@ inline constexpr recomp::i18n::Entry kPortuguese[] = {
     {"Stopped", "Parado"}, // (native-replays)
     {"No longer matches", "Não confere mais"}, // (native-replays)
     {"Not while watching a replay.", "Não enquanto assiste a um replay."}, // (native-replays)
+    {"Record input...", "Gravar entradas..."}, // (replay-compatibility 7)
+    {"Play input...", "Reproduzir entradas..."}, // (replay-compatibility 7)
+    {"Stop replay/record", "Parar replay/gravação"}, // (replay-compatibility 7)
+    {"Playing a replay", "Reproduzindo um replay"}, // (replay-compatibility 7)
+    {"Recording input", "Gravando entradas"}, // (replay-compatibility 7)
+    {"Not while playing online", "Não enquanto joga online"}, // (replay-compatibility 7)
+    {"Recording input: Game > Replay > Stop saves it", "Gravando entradas: Jogo > Replay > Parar salva"}, // (replay-compatibility 7)
+    {"Playing a replay: Game > Replay > Stop gives you the controls", "Reproduzindo um replay: Jogo > Replay > Parar devolve os controles"}, // (replay-compatibility 7)
+    {"Replay stopped: the controls are yours from here", "Replay parado: daqui em diante os controles são seus"}, // (replay-compatibility 7)
+    {"Recording too short (under a second): not saved", "Gravação curta demais (menos de um segundo): não foi salva"}, // (replay-compatibility 7)
+    {"Not while playing online.", "Não enquanto joga online."}, // (replay-compatibility 7)
+    {"No file was chosen.", "Nenhum arquivo foi escolhido."}, // (replay-compatibility 7)
 };
 
 } // namespace port

@@ -146,8 +146,10 @@ struct Json {
 }  // namespace
 
 std::string Replay::HeaderJson(const Info &info) {
-    std::string j = "{\"game\":" + Quoted(info.game) + ",\"title\":" + Quoted(info.title) + ",\"build\":" + Quoted(info.build) +
-                    ",\"forkade\":" + Quoted(info.forkade) + ",\"mode\":" + Quoted(info.mode);
+    std::string j = "{\"format\":2,\"backend\":" + Quoted(info.backend) + ",\"game\":" + Quoted(info.game) + ",\"title\":" + Quoted(info.title) +
+                    ",\"identity\":" + Quoted(info.identity) + ",\"build\":" + Quoted(info.build) + ",\"version\":" + Quoted(info.version) +
+                    ",\"forkade\":" + Quoted(info.forkade) + ",\"inputs\":{\"players\":" + std::to_string(info.inputPlayers) +
+                    ",\"bytes\":" + std::to_string(info.inputBytes) + "},\"mode\":" + Quoted(info.mode);
     if (!info.role.empty()) {
         j += ",\"role\":" + Quoted(info.role);
     }
@@ -180,6 +182,22 @@ bool Replay::ParseHeader(const std::string &json, Info &info) {
         if (key == "game") info.game = r.String();
         else if (key == "title") info.title = r.String();
         else if (key == "build") info.build = r.String();
+        else if (key == "backend") info.backend = r.String();
+        else if (key == "identity") info.identity = r.String();
+        else if (key == "version") info.version = r.String();
+        else if (key == "inputs") {
+            if (!r.Eat('{')) return false;
+            if (!r.Eat('}')) {
+                do {
+                    const std::string inner = r.String();
+                    if (!r.Eat(':')) return false;
+                    if (inner == "players") info.inputPlayers = static_cast<int>(r.Number());
+                    else if (inner == "bytes") info.inputBytes = static_cast<int>(r.Number());
+                    else r.Skip();
+                } while (r.ok && r.Eat(','));
+                if (!r.Eat('}')) return false;
+            }
+        }
         else if (key == "forkade") info.forkade = r.String();
         else if (key == "mode") info.mode = r.String();
         else if (key == "role") info.role = r.String();
@@ -224,8 +242,11 @@ bool Replay::ParseHeader(const std::string &json, Info &info) {
 std::vector<uint8_t> Replay::Bytes() const {
     std::vector<uint8_t> out(kMagic, kMagic + 8);
     Put16(out, kFormat);
-    Put16(out, backend);
-    const std::string header = HeaderJson(info);
+    Put16(out, 0); // (format 2: the backend is named in the header)
+    Info written = info;
+    written.inputPlayers = players;
+    if (written.inputBytes != 4) written.inputBytes = 2;
+    const std::string header = HeaderJson(written);
     Put32(out, static_cast<uint32_t>(header.size()));
     out.insert(out.end(), header.begin(), header.end());
     const std::vector<uint8_t> packedState = Compress(state);
@@ -240,6 +261,7 @@ std::vector<uint8_t> Replay::Bytes() const {
         last = frame;
         for (int n = 0; n < players; n++) {
             Put16(raw, pads[static_cast<size_t>(n)]);
+            if (written.inputBytes == 4) Put16(raw, 0);
         }
     }
     const std::vector<uint8_t> packedInputs = Compress(raw);
@@ -262,7 +284,7 @@ bool Replay::Read(const std::vector<uint8_t> &bytes, std::string &error) {
         return false;
     }
     const uint16_t format = r.U16();
-    backend = r.U16();
+    const uint16_t backendField = r.U16();
     if (!r.ok) {
         error = "the replay is cut short";
         return false;
@@ -285,6 +307,21 @@ bool Replay::Read(const std::vector<uint8_t> &bytes, std::string &error) {
         error = "the replay's header can't be read";
         return false;
     }
+    info.format = format;
+    if (format == 1) {
+        // (0.1.2's: the CPS games, two bytes a player, no identity)
+        if (backendField != kBackendCps) {
+            error = "a replay of another kind of game (backend " + std::to_string(backendField) + ")";
+            return false;
+        }
+        info.backend = "cps";
+        info.identity.clear();
+        info.inputBytes = 2;
+    } else if (backendField != 0 || info.backend.empty() || (info.inputBytes != 2 && info.inputBytes != 4)) {
+        error = "the replay's header can't be read";
+        return false;
+    }
+    backend = info.backend == "cps" ? kBackendCps : 0;
     // (the state, then the inputs: a raw length, a compressed length, the zlib bytes)
     auto part = [&](std::vector<uint8_t> &out) {
         const uint32_t raw = r.U32(), packed = r.U32();
@@ -329,7 +366,8 @@ bool Replay::Read(const std::vector<uint8_t> &bytes, std::string &error) {
                 break;
             }
         }
-        if (at + 2u * static_cast<size_t>(players) > raw.size()) {
+        const size_t width = static_cast<size_t>(info.inputBytes);
+        if (at + width * static_cast<size_t>(players) > raw.size()) {
             error = "the replay's inputs are damaged";
             return false;
         }
@@ -337,7 +375,12 @@ bool Replay::Read(const std::vector<uint8_t> &bytes, std::string &error) {
         Pads pads{};
         for (int n = 0; n < players; n++) {
             pads[static_cast<size_t>(n)] = static_cast<uint16_t>(raw[at] | (raw[at + 1] << 8));
-            at += 2;
+            // (a 4-byte input whose upper half is used is not this game's: refused, never cut)
+            if (width == 4 && (raw[at + 2] | raw[at + 3])) {
+                error = "the replay's inputs are wider than this game's";
+                return false;
+            }
+            at += width;
         }
         inputs[frame] = pads;
     }
@@ -406,7 +449,7 @@ bool Replay::ReadInfo(const std::string &path, Info &info, std::string &error) {
     }
     const uint16_t format = static_cast<uint16_t>(start[8] | (start[9] << 8));
     const uint32_t size = start[12] | (start[13] << 8) | (start[14] << 16) | (static_cast<uint32_t>(start[15]) << 24);
-    if (format == 0 || format > kFormat || size > kHeaderMost) {
+    if (format == 0 || format > kFormat || size > kHeaderMost) { // (format 1 and 2: the header is in the same place)
         std::fclose(f);
         error = format > kFormat ? "a replay of a newer ForkAde" : "the replay's header can't be read";
         return false;

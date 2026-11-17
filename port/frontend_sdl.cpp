@@ -3,6 +3,7 @@
 //
 // The window: SDL3 picture, sound and controls around Port::RunFrame().
 #include "game_info.h"
+#include <mutex>
 
 #include "bindings.h"
 #include "port.h"
@@ -178,7 +179,25 @@ namespace {
     }
 
     // The menu bar's own entries (the in-game menu's have ids of their own: recomp::IsMenuEntry)
-    enum { kBarQuickSave = 1, kBarQuickLoad, kBarFullscreen, kBarAbout, kBarKey, kBarScreenshot, kBarChat, kBarChatHistory };
+    enum { kBarQuickSave = 1, kBarQuickLoad, kBarFullscreen, kBarAbout, kBarKey, kBarScreenshot, kBarChat, kBarChatHistory,
+           kBarRecordInput, kBarPlayInput, kBarStopReplay };
+
+    // (replay-compatibility 7) SDL's file dialogs answer on their own thread: the chosen file waits here for the
+    // window's loop (kind: kBarRecordInput or kBarPlayInput)
+    struct ReplayDialog {
+        std::mutex lock;
+        int kind = 0;
+        std::string path;
+        bool answered = false;
+    };
+    ReplayDialog replayDialog;
+    void SDLCALL ReplayDialogDone(void *userdata, const char *const *files, int) {
+        std::lock_guard<std::mutex> hold(replayDialog.lock);
+        replayDialog.kind = static_cast<int>(reinterpret_cast<intptr_t>(userdata));
+        replayDialog.path = files && files[0] ? files[0] : "";
+        replayDialog.answered = true;
+    }
+    const SDL_DialogFileFilter kReplayFilter[] = {{"Replays (.fareplay)", "fareplay"}};
 
     // The keys that work while playing, for Help's list (each an entry that does nothing)
     const char *const kKeys[][2] = {
@@ -200,7 +219,7 @@ namespace {
 
 } // namespace
 
-void BarMenus(Port &port, recomp::MenuBar &bar, bool fullscreen) {
+void BarMenus(Port &port, recomp::MenuBar &bar, bool fullscreen, std::vector<recomp::BarMenu> *copy) {
     std::vector<recomp::BarMenu> menus = {{"Game", {}}, {"Video", {}}, {"Audio", {}}, {"Input", {}}, {"Features", {}}, {"Help", {}}};
     std::error_code error;
     recomp::BarOptions options;
@@ -264,6 +283,21 @@ void BarMenus(Port &port, recomp::MenuBar &bar, bool fullscreen) {
     game.insert(game.begin() + static_cast<std::ptrdiff_t>(after),
                 {recomp::BarEntry::Line(), BarItem("Quick save", kBarQuickSave, "F5"),
                  BarItem("Quick load", kBarQuickLoad, "F9", options.slotUsed(port.menu.Slot())), BarItem("Screenshot", kBarScreenshot, "F8")});
+    // Game: the Replay submenu (Record input..., Play input..., Stop), after the screenshot
+    {
+        const bool online = port.net || port.gekkoOnline;
+        const bool recordingByHand = port.recording && !port.manualPath.empty();
+        recomp::BarEntry replay = BarItem("Replay", 0);
+        if (port.replaying) replay.children.push_back(BarItem("Playing a replay", 0, "", false));
+        else if (!port.manualPath.empty()) replay.children.push_back(BarItem("Recording input", 0, "", false));
+        replay.children.push_back(BarItem("Record input...", kBarRecordInput, "", !online && !port.replaying && port.manualPath.empty()));
+        replay.children.push_back(BarItem("Play input...", kBarPlayInput, "", !online));
+        replay.children.push_back(BarItem("Stop replay/record", kBarStopReplay, "", !online && (port.replaying || recordingByHand || !port.manualPath.empty())));
+        if (online) replay.children.push_back(BarItem("Not while playing online", 0, "", false));
+        replay.enabled = !online; // (dim online, as the save states are)
+        auto shot = std::find_if(game.begin(), game.end(), [](const recomp::BarEntry &e) { return e.id == kBarScreenshot; });
+        game.insert(shot == game.end() ? game.end() : shot + 1, std::move(replay));
+    }
     // Video: full screen (F11, Alt+Enter)
     std::vector<recomp::BarEntry> &video = menus[1].entries;
     if (!video.empty()) {
@@ -298,6 +332,7 @@ void BarMenus(Port &port, recomp::MenuBar &bar, bool fullscreen) {
     // (this fork) The in-game chat's entries, dim with no match to chat in
     recomp::AddChatEntries(menus, kBarChat, kBarChatHistory, port.chatKey, port.Chat() != nullptr);
     menus.erase(std::remove_if(menus.begin(), menus.end(), [](const recomp::BarMenu &m) { return m.entries.empty(); }), menus.end());
+    if (copy) *copy = menus;
     bar.Configure(std::move(menus));
 
 }
@@ -703,8 +738,74 @@ int RunWindowed(Port &port) {
         } else if (chosen.id == kBarAbout) {
             port.notice = std::string(title) + " - ForkAde, a native port by static recompilation (cps2recomp)";
             port.noticeUntil = port.tick + 240;
+        } else if (chosen.id == kBarRecordInput || chosen.id == kBarPlayInput) {
+            // (the replay folder made first, so the dialog opens in it)
+            std::error_code ignored;
+            if (!port.opt.replayFolder.empty())
+                std::filesystem::create_directories(std::filesystem::path(std::u8string(reinterpret_cast<const char8_t *>(port.opt.replayFolder.c_str()))), ignored);
+            const std::string where = chosen.id == kBarRecordInput ? port.ProposedReplayPath() : port.opt.replayFolder;
+            void *kind = reinterpret_cast<void *>(static_cast<intptr_t>(chosen.id));
+            if (chosen.id == kBarRecordInput) SDL_ShowSaveFileDialog(ReplayDialogDone, kind, window, kReplayFilter, 1, where.empty() ? nullptr : where.c_str());
+            else SDL_ShowOpenFileDialog(ReplayDialogDone, kind, window, kReplayFilter, 1, where.empty() ? nullptr : where.c_str(), false);
+        } else if (chosen.id == kBarStopReplay) {
+            port.StopReplay();
         }
         BarMenus(port, bar, isFullscreen());
+    };
+    // (tests: CPS2RECOMP_BAR_SHOT=TICK:FILE: at that tick the bar's Game menu is opened at its Replay submenu, drawn
+    // to FILE (PNG) and its entries listed; a hidden window, CPS2RECOMP_HIDDEN_WINDOW, needs no screen)
+    const char *barShot = std::getenv("CPS2RECOMP_BAR_SHOT");
+    const uint64_t barShotTick = barShot ? std::strtoull(barShot, nullptr, 10) : 0;
+    auto barShotNow = [&] {
+        if (!barShot || port.tick != barShotTick) return;
+        const char *file = std::strchr(barShot, ':');
+        std::vector<recomp::BarMenu> menus;
+        BarMenus(port, bar, isFullscreen(), &menus);
+        int width = 0, height = 0;
+        SDL_GetWindowSizeInPixels(window, &width, &height);
+        bar.SetArea(width, height, BarDot(height));
+        bar.OpenMenu(0);
+        int downs = 0;
+        bool found = false;
+        for (const recomp::BarEntry &e : menus[0].entries) {
+            if (e.label == "Replay") { found = e.enabled; break; } // (dim: the Game menu only, as it shows)
+            if (!e.IsLine() && e.enabled) downs++;
+        }
+        for (int i = 0; found && i < downs; i++) bar.Buttons(recomp::kMenuDown);
+        if (found) bar.Buttons(recomp::kMenuRight);
+        for (const recomp::BarEntry &e : menus[0].entries)
+            if (e.label == "Replay")
+                for (const recomp::BarEntry &c : e.children) fprintf(stderr, "bar: Replay > %s%s\n", c.label.c_str(), c.enabled ? "" : " (dim)");
+        std::vector<uint32_t> pixels;
+        std::vector<SDL_Rect> regions;
+        BarPicture(bar, width, height, pixels, regions);
+        if (file && WritePng(file + 1, pixels.data(), static_cast<uint32_t>(width), static_cast<uint32_t>(height)))
+            fprintf(stderr, "bar: drawn to %s\n", file + 1);
+        bar.Close();
+    };
+    // (a file chosen in a replay dialog: recorded to, or played)
+    auto replayDialogs = [&] {
+        int kind = 0;
+        std::string path;
+        {
+            std::lock_guard<std::mutex> hold(replayDialog.lock);
+            if (!replayDialog.answered) return;
+            replayDialog.answered = false;
+            kind = replayDialog.kind;
+            path = replayDialog.path;
+        }
+        if (path.empty()) return; // (cancelled)
+        if (kind == kBarRecordInput && path.size() < 9) path += ".fareplay";
+        else if (kind == kBarRecordInput && path.substr(path.size() - 9) != ".fareplay") path += ".fareplay";
+        std::string error;
+        const bool ok = kind == kBarRecordInput ? port.RecordInputTo(path, error) : port.PlayInput(path, error);
+        if (!ok) {
+            port.notice = error;
+            port.noticeUntil = port.tick + 300;
+            fprintf(stderr, "replay: %s\n", error.c_str());
+        }
+        BarMenus(port, bar, isFullscreen());
+        barDirty = true;
     };
     // (the pointer's place in the window's pixels: events give it in the window's points)
     auto pixelsOf = [&](float x, float y, float &px, float &py) {
@@ -894,6 +995,8 @@ int RunWindowed(Port &port) {
         if (port.typing && !port.Chat()) { // (this fork: either session's)
             chatOpen(false); // (the match over, or waited for again)
         }
+        replayDialogs();
+        barShotNow();
         while (SDL_PollEvent(&ev)) {
             if (touch.Event(ev)) {
                 continue;

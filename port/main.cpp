@@ -39,6 +39,8 @@
 #include <ctime>
 #include <deque>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <set>
 #include <sstream>
 #include <thread>
@@ -2111,6 +2113,36 @@ std::string FileSafe(const std::string &name, const char *otherwise) {
     return out.empty() ? otherwise : out;
 }
 
+// (replay-compatibility) The gameplay identity a format-1 replay's program had: the table of earlier releases'
+// programs, replays/legacy-builds.json ({"<program SHA-256>": "<gameplay identity>", ...}), looked for beside this
+// program and in the folders above it (a package keeps it at its top). Empty: not in it.
+std::string LegacyIdentity(const std::string &build) {
+    if (build.size() != 64) return {};
+    std::error_code ignored;
+    std::filesystem::path at;
+#ifdef _WIN32
+    wchar_t self[MAX_PATH * 4];
+    const DWORD length = GetModuleFileNameW(nullptr, self, static_cast<DWORD>(std::size(self)));
+    if (length == 0 || length >= std::size(self)) return {};
+    at = std::filesystem::path(self).parent_path();
+#else
+    at = std::filesystem::current_path(ignored);
+#endif
+    for (int up = 0; up < 4 && !at.empty(); ++up, at = at.parent_path()) {
+        const auto table = at / "replays" / "legacy-builds.json";
+        std::ifstream in(table, std::ios::binary);
+        if (!in) continue;
+        const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        const size_t key = text.find("\"" + build + "\"");
+        if (key == std::string::npos) return {};
+        const size_t colon = text.find(':', key + build.size() + 2), open = colon == std::string::npos ? colon : text.find('"', colon);
+        const size_t close = open == std::string::npos ? open : text.find('"', open + 1);
+        if (close == std::string::npos || close - open - 1 != 64) return {};
+        return text.substr(open + 1, 64);
+    }
+    return {};
+}
+
 // The game program's SHA-256, as the launcher's build identity has it (lowercase hex; empty: not known)
 std::string ProgramSha256() {
     static std::string sum;
@@ -2160,11 +2192,22 @@ std::string ProgramSha256() {
 
 } // namespace
 
+#ifndef REPLAY_IDENTITY
+#define REPLAY_IDENTITY ""
+#endif
+
 void Port::RecordInput(const uint16_t pressed[]) {
     // (local play only here: online play's GekkoNet session records its confirmed frames itself, Tommy's netplay
     // and a replay played back record nothing)
-    if (opt.replayFolder.empty() || !opt.replayPlay.empty() || net || gekkoOnline) {
+    if ((opt.replayFolder.empty() && manualPath.empty()) || !opt.replayPlay.empty() || net || gekkoOnline) {
         return;
+    }
+    // (after a replay was stopped: its frames are not a session, nothing is recorded until the game is reset)
+    if (recordHeld) {
+        if (frame >= recordHeldAt) {
+            return;
+        }
+        recordHeld = false;
     }
     // (the service and test switches are not in a replay's inputs: while one is on, nothing is recorded)
     if (machine->serviceButton || machine->testSwitch) {
@@ -2201,12 +2244,32 @@ void Port::RecordEnd(bool stateIsLast) {
     }
     std::unique_ptr<Replay> replay = std::move(recording);
     const uint64_t frames = recordNext > recordFrom ? recordNext - recordFrom : 0;
+    const std::string chosen = std::move(manualPath);
+    manualPath.clear();
     if (frames < 60) {
+        if (!chosen.empty()) {
+            notice = "Recording too short (under a second): not saved";
+            noticeUntil = tick + 180;
+        }
         return; // (under a second: nothing worth keeping)
     }
     replay->info.frames = frames;
     if (stateIsLast && frame == recordNext && (replay->checks.empty() || replay->checks.back().first != frames)) {
         replay->checks.emplace_back(frames, StateHash(true));
+    }
+    if (!chosen.empty()) {
+        // (Record input...: the name the player chose)
+        std::string error;
+        if (replay->Save(chosen, error)) {
+            replayNote = "Replay saved: " + std::filesystem::path(std::u8string(reinterpret_cast<const char8_t *>(chosen.c_str()))).filename().string();
+        } else {
+            replayNote = "Couldn't save the replay: " + error;
+        }
+        notice = replayNote;
+        noticeUntil = tick + 240;
+        if (error.empty()) fprintf(stderr, "replay: %s (%llu frames)\n", chosen.c_str(), static_cast<unsigned long long>(frames));
+        else fprintf(stderr, "replay: %s\n", replayNote.c_str());
+        return;
     }
     SaveReplay(*replay);
 }
@@ -2219,13 +2282,23 @@ bool Port::StartReplay(std::string &error) {
         return false;
     }
     const Replay::Info &info = replay->info;
-    if (replay->backend != Replay::kBackendCps || info.game != GAME_ID) {
+    if (info.backend != "cps" || info.game != GAME_ID) {
         error = "This replay is of " + (info.title.empty() ? info.game : info.title) + ", not of " GAME_NAME ".";
         return false;
     }
+    // (replay-compatibility) Any build whose gameplay identity is the replay's plays it; a format-1 replay (0.1.2)
+    // has none: its program's SHA-256 is this program, or the table of earlier releases gives its identity
+    std::string identity = info.identity;
     const std::string build = ProgramSha256();
-    if (!info.build.empty() && !build.empty() && info.build != build) {
-        error = "This replay needs the build of " GAME_NAME " it was recorded with: this is another one.";
+    if (identity.empty() && !info.build.empty() && info.build != build) {
+        identity = LegacyIdentity(info.build);
+        if (identity.empty()) {
+            error = "This replay needs the build of " GAME_NAME " it was recorded with, which this version doesn't know.";
+            return false;
+        }
+    }
+    if (!identity.empty() && identity != REPLAY_IDENTITY) {
+        error = "This replay was recorded with an earlier version whose " GAME_NAME " plays differently from this one: watch it from the launcher's Replays page.";
         return false;
     }
     // The options it was recorded with, for this run only (settings.ini as it is), and online play's rules if it
@@ -2302,6 +2375,69 @@ void Port::ReplayRan() {
 
 std::string Port::BuildIdentity() const { return ProgramSha256(); }
 
+bool Port::RecordInputTo(const std::string &path, std::string &error) {
+    if (net || gekkoOnline) { error = "Not while playing online."; return false; }
+    if (replaying) { error = "Not while watching a replay."; return false; }
+    if (path.empty()) { error = "No file was chosen."; return false; }
+    RecordEnd(true); // (the automatic recording, saved as it is)
+    recording.reset();
+    recordHeld = false;
+    manualPath = path;
+    notice = "Recording input: Game > Replay > Stop saves it";
+    noticeUntil = tick + 240;
+    return true;
+}
+
+bool Port::PlayInput(const std::string &path, std::string &error) {
+    if (net || gekkoOnline) { error = "Not while playing online."; return false; }
+    if (path.empty()) { error = "No file was chosen."; return false; }
+    RecordEnd(true);
+    recording.reset();
+    manualPath.clear();
+    const std::string before = opt.replayPlay;
+    opt.replayPlay = path;
+    if (!StartReplay(error)) {
+        opt.replayPlay = before;
+        return false;
+    }
+    paused = false;
+    notice = "Playing a replay: Game > Replay > Stop gives you the controls";
+    noticeUntil = tick + 240;
+    return true;
+}
+
+void Port::StopReplay() {
+    if (replaying) {
+        // (the frame stays as the replay left it; the players' controls from here, and nothing recorded until a reset)
+        replaying.reset();
+        opt.replayPlay.clear();
+        replayDrift.clear();
+        replayEnded = false;
+        TheGame().online = false;
+        paused = false;
+        recordHeld = true;
+        recordHeldAt = frame;
+        notice = "Replay stopped: the controls are yours from here";
+        noticeUntil = tick + 240;
+        fprintf(stderr, "replay: stopped at frame %llu\n", static_cast<unsigned long long>(frame));
+        return;
+    }
+    if (recording && !manualPath.empty()) {
+        RecordEnd(true);
+    } else if (!manualPath.empty()) {
+        manualPath.clear(); // (stopped before a frame was recorded)
+    }
+}
+
+std::string Port::ProposedReplayPath() const {
+    std::string stamp = LocalTimeText(std::time(nullptr), false).substr(0, 19);
+    for (char &c : stamp) c = c == 'T' ? '_' : c == ':' ? '-' : c;
+    const std::string name = stamp + "_" + GAME_ID + "_" + FileSafe(opt.nick, "P1") + "-manual.fareplay";
+    if (opt.replayFolder.empty()) return name;
+    return (std::filesystem::path(std::u8string(reinterpret_cast<const char8_t *>(opt.replayFolder.c_str()))) /
+            std::filesystem::path(std::u8string(reinterpret_cast<const char8_t *>(name.c_str())))).string();
+}
+
 std::unique_ptr<Replay> Port::NewReplay(const char *mode) {
     auto replay = std::make_unique<Replay>();
     replay->state = StateBytes();
@@ -2314,6 +2450,9 @@ std::unique_ptr<Replay> Port::NewReplay(const char *mode) {
     info.title = GAME_NAME;
     info.build = ProgramSha256();
     info.forkade = CPS2RECOMP_VERSION;
+    info.version = CPS2RECOMP_VERSION;
+    info.backend = "cps";
+    info.identity = REPLAY_IDENTITY;
     info.mode = mode;
     info.started = LocalTimeText(std::time(nullptr), false);
     info.features = FeatureText();
@@ -3400,6 +3539,15 @@ void Port::RunFrame() {
     if (!net && AtFrame(opt.stateLoad, frame, path) && !LoadState(path, error)) {
         fprintf(stderr, "%s\n", error.c_str());
     }
+    if (AtFrame(opt.recordInputAt, frame, path) && !RecordInputTo(path, error)) {
+        fprintf(stderr, "replay: %s\n", error.c_str());
+    }
+    if (AtFrame(opt.playInputAt, frame, path) && !PlayInput(path, error)) {
+        fprintf(stderr, "replay: %s\n", error.c_str());
+    }
+    if (opt.stopReplayAt && frame == opt.stopReplayAt) {
+        StopReplay();
+    }
     if (replaying) {
         ReplayInput(pressed);
     }
@@ -4011,6 +4159,12 @@ bool ParseArgs(int argc, char **argv, port::Options &o) {
             o.stateSave = next();
         } else if (a == "--state-load") {
             o.stateLoad = next();
+        } else if (a == "--record-input-at") {
+            o.recordInputAt = next();
+        } else if (a == "--play-input-at") {
+            o.playInputAt = next();
+        } else if (a == "--stop-replay-at") {
+            o.stopReplayAt = strtoull(next(), nullptr, 10);
         } else if (a == "--stats") {
             o.stats = true;
         } else if (a == "--gekko-host") {

@@ -724,6 +724,18 @@ inline constexpr recomp::i18n::Entry kSpanish[] = {
     {"Stopped", "Detenido"}, // (native-replays)
     {"No longer matches", "Ya no coincide"}, // (native-replays)
     {"Not while watching a replay.", "No mientras ves una repetición."}, // (native-replays)
+    {"Record input...", "Grabar entradas..."}, // (replay-compatibility 7)
+    {"Play input...", "Reproducir entradas..."}, // (replay-compatibility 7)
+    {"Stop replay/record", "Detener repetición/grabación"}, // (replay-compatibility 7)
+    {"Playing a replay", "Reproduciendo una repetición"}, // (replay-compatibility 7)
+    {"Recording input", "Grabando entradas"}, // (replay-compatibility 7)
+    {"Not while playing online", "No mientras juegas en línea"}, // (replay-compatibility 7)
+    {"Recording input: Game > Replay > Stop saves it", "Grabando entradas: Juego > Repetición > Detener la guarda"}, // (replay-compatibility 7)
+    {"Playing a replay: Game > Replay > Stop gives you the controls", "Reproduciendo una repetición: Juego > Repetición > Detener te devuelve los controles"}, // (replay-compatibility 7)
+    {"Replay stopped: the controls are yours from here", "Repetición detenida: desde aquí los controles son tuyos"}, // (replay-compatibility 7)
+    {"Recording too short (under a second): not saved", "Grabación muy corta (menos de un segundo): no se guardó"}, // (replay-compatibility 7)
+    {"Not while playing online.", "No mientras juegas en línea."}, // (replay-compatibility 7)
+    {"No file was chosen.", "No se eligió ningún archivo."}, // (replay-compatibility 7)
 };
 
 } // namespace port

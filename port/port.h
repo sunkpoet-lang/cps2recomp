@@ -58,6 +58,10 @@ struct Options {
     std::string sound;         // driver | z80 | check (default: driver when the game's sound program is a known one)
     std::string video;         // board | check (docs/NATIVE_VIDEO.md; default: board)
     std::string stateSave, stateLoad; // FRAME:path
+    // (replay-compatibility 7, for checks) the Replay submenu's Record input..., Play input... (FRAME:path) and Stop
+    // (FRAME) at a frame, as the menu does them with the file chosen
+    std::string recordInputAt, playInputAt;
+    uint64_t stopReplayAt = 0;
     uint64_t frames = 0;       // stop after this many (0: run on)
     uint64_t shotEvery = 0;
     uint64_t autoSeed = 0;     // --auto: made-up input from this seed
@@ -383,6 +387,17 @@ struct Port {
     bool StartReplay(std::string &error);
     void ReplayInput(uint16_t pressed[]);
     void ReplayRan();
+    // (replay-compatibility 7) The Game menu's Replay submenu. RecordInput saves the automatic recording and begins one
+    // at this frame, saved under the chosen name (manualPath) when it is stopped; PlayInput plays a replay in place, as
+    // --replay does; StopReplay ends either: a replay's frame stays and the controls are the players' from it (nothing
+    // is recorded until the game is reset: recordHeld), a recording is saved. Not online.
+    std::string manualPath;
+    bool recordHeld = false;
+    uint64_t recordHeldAt = 0;
+    bool RecordInputTo(const std::string &path, std::string &error);
+    bool PlayInput(const std::string &path, std::string &error);
+    void StopReplay();
+    std::string ProposedReplayPath() const; // (the replay folder, and a name as the automatic ones end "-manual")
     // replay: the fingerprint a replay keeps, the same whatever the player's picture and sound (online play's)
     uint32_t StateHash(bool replay = false) const;
     bool SaveState(const std::string &path, std::string &error);
@@ -395,7 +410,7 @@ int RunWindowed(Port &port);
 // rows and the window's own entries, made again whenever what they show may have changed), how many of the
 // window's pixels make a dot of its letters in a window so many pixels tall, how tall its strip is then, and
 // its picture as the presenter's overlay (the strip, and the menus open)
-void BarMenus(Port &port, recomp::MenuBar &bar, bool fullscreen);
+void BarMenus(Port &port, recomp::MenuBar &bar, bool fullscreen, std::vector<recomp::BarMenu> *copy = nullptr);
 int BarDot(int windowHeight);
 int BarStrip(int windowHeight);
 void BarPicture(const recomp::MenuBar &bar, int width, int height, std::vector<uint32_t> &pixels, std::vector<SDL_Rect> &regions);

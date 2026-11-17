@@ -1,0 +1,17 @@
+# (this fork, replay-compatibility) The sources that decide a CPS game's emulated state, for its replays' gameplay
+# identity: CMake hashes every file these patterns match (recursively, sorted, by path relative to its root), the
+# save state's version (port/main.cpp's kStateVersion) and the game's id into REPLAY_IDENTITY. A replay plays on any
+# build with the same identity, whatever its program's SHA-256. The menu, window, picture, online play and the
+# launcher are left out: changing them keeps every replay. @GAME@ is the game's directory (game.cfg, its ROM set and
+# sources), @WORK@ its generated code.
+machine/*
+sound/*
+video/*
+runtime/*
+fight/*
+beat/*
+model/*
+shmup/*
+@GAME@/game.cfg
+@GAME@/src/*
+@WORK@/gen/*

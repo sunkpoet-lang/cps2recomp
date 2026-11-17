@@ -2,11 +2,11 @@
 // (this fork, ForkAde's native-replays) A ForkAde replay file, .fareplay: what a match was (a JSON header), the
 // machine's state when the recording began, every player's confirmed inputs frame by frame, and frame checksums at
 // intervals, so that playback can tell when it no longer matches. Little-endian:
-//   "FAREPLAY", format (uint16, 1), backend (uint16, 1: the CPS games)
-//   header: length (uint32), UTF-8 JSON
+//   "FAREPLAY", format (uint16: 2; 1 is still read), backend (uint16: 0, named in the header; format 1: 1, the CPS games)
+//   header: length (uint32), UTF-8 JSON (format 2 adds: backend "cps", identity, version, inputs {players, bytes})
 //   state: raw length, compressed length (uint32 each), zlib (the port's save state)
 //   inputs: raw length, compressed length, zlib of: players (uint8), then each change: frame delta (varint), each
-//           player's pressed bits (uint16)
+//           player's pressed bits (the header's inputs.bytes each, little-endian: 2, or 4; format 1: 2)
 //   checksums: count (uint32), then each: frame (uint64), hash (uint32)
 // Tommy's text movie (--record, --movie) is unchanged; this is ForkAde's file beside it.
 #pragma once
@@ -21,7 +21,10 @@
 namespace port {
 
 struct Replay {
-    static constexpr uint16_t kFormat = 1;
+    // (replay-compatibility) Format 2 is written; format 1 (0.1.2) is still read. A replay plays on any build whose
+    // gameplay identity is its own (REPLAY_IDENTITY: the sources that decide the game's state), whatever its program;
+    // a format-1 replay has no identity: its program's SHA-256 is looked up in the table of earlier releases.
+    static constexpr uint16_t kFormat = 2;
     static constexpr uint16_t kBackendCps = 1;
     using Pads = std::array<uint16_t, 4>;
 
@@ -40,6 +43,11 @@ struct Replay {
         // player's own ones off (Game::online): playback sets them so for its run
         std::string features;
         bool online = false;
+        // (format 2) The backend by name ("cps"), the gameplay identity, the version that recorded it and each
+        // player's input width in bytes; read from format 1: "cps", no identity, 2
+        std::string backend = "cps", identity, version;
+        int inputBytes = 2, inputPlayers = 2;
+        int format = kFormat;  // (what the file was)
     };
 
     uint16_t backend = kBackendCps;

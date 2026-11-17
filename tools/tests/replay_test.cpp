@@ -1,11 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// (this fork, ForkAde's native-replays 1.2) The .fareplay file: written and read back equal; a cut file, a wrong
-// magic, a newer format, a header over its length and damaged data each refused with their reason.
+// (this fork, ForkAde's native-replays 1.2; replay-compatibility 2.1) The .fareplay file: format 2 written and read
+// back equal (its backend, identity, version, four players and 4-byte inputs too); a format-1 file as 0.1.2 wrote
+// it still read; a cut file, a wrong magic, a newer format, a header over its length and damaged data each refused.
 //   make check-replay
 #include "../../port/replay.h"
 
 #include <cstdio>
 #include <string>
+#include <zlib.h>
 
 using port::Replay;
 
@@ -21,6 +23,8 @@ static Replay Sample() {
     r.info.title = "Super Street Fighter II Turbo";
     r.info.build = std::string(64, 'a');
     r.info.forkade = "0.1.0-beta";
+    r.info.identity = std::string(64, 'b');
+    r.info.version = "0.1.3";
     r.info.mode = "online";
     r.info.role = "host";
     r.info.players = {"Daniel", "Iñaki \"Fabs\""};
@@ -57,6 +61,9 @@ int main() {
               b.info.started == a.info.started && b.info.frames == a.info.frames && b.info.result && b.info.wins == a.info.wins &&
               b.info.features == a.info.features && b.info.online,
           "its header is the same (names with quotes and accents too)");
+    Check(b.info.format == 2 && b.info.backend == "cps" && b.info.identity == a.info.identity && b.info.version == "0.1.3" &&
+              b.info.inputBytes == 2 && b.info.inputPlayers == 2,
+          "format 2: its backend, identity, version and inputs' width are kept");
     Check(b.state == a.state, "its state is the same");
     Check(b.players == a.players && b.inputs == a.inputs, "its inputs are the same");
     Check(b.checks == a.checks, "its checksums are the same");
@@ -79,7 +86,7 @@ int main() {
     }
     {
         std::vector<uint8_t> newer = bytes;
-        newer[8] = 2;
+        newer[8] = 3;
         refused(newer, "newer ForkAde", "a newer format is refused: update ForkAde");
     }
     {
@@ -92,6 +99,41 @@ int main() {
         const size_t header = damaged[12] | (damaged[13] << 8);
         damaged[16 + header + 8 + 20] ^= 0xff;  // (inside the compressed state)
         refused(damaged, "damaged", "damaged data is refused");
+    }
+    {
+        // Four players, 4 bytes each
+        Replay four = Sample();
+        four.players = 4;
+        four.info.inputBytes = 4;
+        four.inputs[500] = {1, 2, 0x8000, 0xffff};
+        Replay back;
+        Check(back.Read(four.Bytes(), error) && back.players == 4 && back.inputs == four.inputs && back.info.inputBytes == 4 &&
+                  back.info.inputPlayers == 4,
+              "four players with 4-byte inputs read back equal");
+    }
+    {
+        // A format-1 file as 0.1.2 wrote it: backend 1 in the fixed start, no identity, two bytes a player
+        auto put16 = [](std::vector<uint8_t> &o, unsigned v) { o.push_back(v & 0xff); o.push_back((v >> 8) & 0xff); };
+        auto put32 = [](std::vector<uint8_t> &o, uint32_t v) { for (int i = 0; i < 4; i++) o.push_back((v >> (8 * i)) & 0xff); };
+        auto part = [&](std::vector<uint8_t> &o, const std::vector<uint8_t> &raw) {
+            uLongf size = compressBound(static_cast<uLong>(raw.size())); std::vector<uint8_t> z(size);
+            compress2(z.data(), &size, raw.data(), static_cast<uLong>(raw.size()), 6);
+            put32(o, static_cast<uint32_t>(raw.size())); put32(o, static_cast<uint32_t>(size)); o.insert(o.end(), z.begin(), z.begin() + size);
+        };
+        std::vector<uint8_t> old = {'F', 'A', 'R', 'E', 'P', 'L', 'A', 'Y'};
+        put16(old, 1); put16(old, 1);
+        const std::string header = "{\"game\":\"ssf2t\",\"title\":\"Super Street Fighter II Turbo\",\"build\":\"" + std::string(64, 'c') +
+                                   "\",\"forkade\":\"0.1.2-beta\",\"mode\":\"local\",\"players\":[\"A\",\"B\"],\"started\":\"x\",\"frames\":120,\"features\":\"\",\"online\":false}";
+        put32(old, static_cast<uint32_t>(header.size())); old.insert(old.end(), header.begin(), header.end());
+        part(old, std::vector<uint8_t>(1000, 7));
+        part(old, {2, 0, 0x10, 0, 0, 0, 5, 0x20, 0, 0, 0}); // (2 players; frame 0: 0x0010, 0; frame 5: 0x0020, 0)
+        put32(old, 1); for (int i = 0; i < 8; i++) old.push_back(i == 0 ? 60 : 0); put32(old, 0x12345678);
+        Replay legacy;
+        Check(legacy.Read(old, error) && legacy.info.format == 1 && legacy.info.backend == "cps" && legacy.info.identity.empty() &&
+                  legacy.info.build == std::string(64, 'c') && legacy.players == 2 && legacy.inputs.size() == 2 && legacy.inputs.at(5)[1] == 0 &&
+                  legacy.inputs.at(5)[0] == 0x20 && legacy.checks.size() == 1,
+              "a format-1 replay of 0.1.2 still reads (backend cps, no identity)");
+        if (!error.empty()) std::printf("     (said: %s)\n", error.c_str());
     }
     // (a file on disk, and only its header)
     const std::string path = "replay_test.fareplay";

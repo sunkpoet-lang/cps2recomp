@@ -1,5 +1,5 @@
 # A copy of recomp-common's src/ and launcher/, made by tools/sync-common.sh. Do not change it here.
-commit 0f7ea4bbfe7f7f975c0f6b330f9b95b583679d14
+commit 2b43c89c4f54ed4427503ae0d63d4a5de4346fdb
 5f10e6a202d52234710ff04168a184f412409097fb9c747dca8ddff12a538251  chat.cpp
 69e9989930ff4990b90c9528c143da9dfd52e1ff9cbcd96a2ff0cc4a75411ad6  chat.h
 1c52d24d40cf1bf66dfa57e24ae73a6bdbf8f16ea4e9f8e186dca0adf2387aa1  folders.h
@@ -12,7 +12,7 @@ commit 0f7ea4bbfe7f7f975c0f6b330f9b95b583679d14
 d46fc703fd348d6a9acb65196377176314c4565245fbe376c5d53c8f965b99a0  launcher/example/description.cpp
 4e4ab0d0fc80effb53dd09b07ce18a40f653b05e8fd35fe83d50292d962a6e7b  launcher/example/game.cpp
 5ab2feef963197e9a8e135dcba446e655913c874e80a548eb7452ab2f09ccb43  launcher/launcher.cmake
-633a7f87037bc84b70fc12fb539fae9818c5bcf8ad27571c5567fdc4a81b8496  launcher/src/app.cpp
+e97d0c729837a74bf3da317d1710f559844aacd5851531dc8cbcc3ef53079607  launcher/src/app.cpp
 5f84b0acea4e94644cbf38ed9d2956886ae8a594b6f0476c651aeeb4d8107b18  launcher/src/app.h
 496e98a4b738f3ae9f6836c22ad13ba927e981be39a22a00d27eda3d039d99e5  launcher/src/bindings.h
 40adba82dca346baa3f5737eca24f13a30d241e7fdd830ed56693098716a49da  launcher/src/community.cpp
