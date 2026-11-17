@@ -13,6 +13,7 @@
 #include "i18n.h"
 #include "../runtime/board.h"
 #include "../fight/battle.h"
+#include "../fight/alternative.h" // (replay-viewer: modes::RoundFought, the round markers)
 #include "../fight/guest_stages.h"
 #include "png_write.h"
 #include "present.h"
@@ -1337,6 +1338,10 @@ void Port::Key(char key, unsigned n) {
         break;
     case 'u': ToggleSoundtrack(!opt.headless); break; // (tests: the music switched over, as F12 does)
     case 'k':
+        if (replaying && replayTaken && n == kKeyRestart) {
+            ReplayRestartTaken(); // (replay-viewer: the moment the side was taken over, again)
+            break;
+        }
         for (size_t i = 0; i < TheGame().commands.size(); i++) {
             if (TheGame().commands[i].key == n && n != kKeyNone) {
                 RunCommand(i);
@@ -1513,6 +1518,12 @@ bool Port::Tick() {
             machine->audio.clear();
         }
         return true;
+    }
+    if (replaying && viewer.Active()) {
+        ViewerPads();
+        if (!replayTaken) {
+            return ViewerTick(); // (replay-viewer: the viewer runs the frames)
+        }
     }
     int frames = 1;
     if (paused) {
@@ -1720,8 +1731,9 @@ void Port::Shown(std::vector<uint32_t> &pixels, std::vector<SDL_Rect> *panels, b
             }
         }
     }
-    // (this fork, native-replays) A replay playing: "REPLAY  Name1  VS  Name2" in the online strip's style at the top,
-    // and under it what it came to (stopped, its end, where it stopped matching)
+    // (this fork, native-replays) A replay playing: "Name1  VS  Name2" in the online strip's style at the top (only the
+    // players, as Fightcade shows them: replay-names-only), and under it where it stopped matching; stopped and its end
+    // too without the replay viewer, whose HUD says them
     if (replaying) {
         const recomp::text::Canvas canvas{px, W, H};
         using recomp::text::Palette;
@@ -1739,13 +1751,15 @@ void Port::Shown(std::vector<uint32_t> &pixels, std::vector<SDL_Rect> *panels, b
             std::string text;
             recomp::text::Color colour;
         };
-        std::vector<Part> parts = {{recomp::i18n::Tr("REPLAY"), Palette::kNumber}};
-        if (!names.empty()) {
-            parts.push_back({cut(names[0]), Palette::kPlayer1});
-        }
-        parts.push_back({"VS", Palette::kVersus});
-        if (names.size() > 1) {
-            parts.push_back({cut(names[1]), Palette::kPlayer2});
+        // (a side with no name: "Player 1" or "Player 2")
+        const std::string one = !names.empty() && !names[0].empty() ? cut(names[0]) : "Player 1";
+        const std::string two = names.size() > 1 && !names[1].empty() ? cut(names[1]) : "Player 2";
+        std::vector<Part> parts = {{one, Palette::kPlayer1}, {"VS", Palette::kVersus}, {two, Palette::kPlayer2}};
+        if (battle::RoundResultNow() >= 0) {
+            // (a fighting game: the score at this point of the replay, as the online strip has it: DANNY 1 VS 3 RODRIGO)
+            const std::array<int, 2> score = ReplayScoreAt(static_cast<uint32_t>(frame - replayFrom));
+            parts.insert(parts.begin() + 1, {std::to_string(score[0]), Palette::kNumber});
+            parts.insert(parts.begin() + 3, {std::to_string(score[1]), Palette::kNumber});
         }
         const float gap = recomp::text::TextWidth("  ", 1);
         float width = -gap;
@@ -1761,9 +1775,10 @@ void Port::Shown(std::vector<uint32_t> &pixels, std::vector<SDL_Rect> *panels, b
             canvas.Text(x, 1, 1, 0, part.colour, part.text.c_str());
             x += recomp::text::TextWidth(part.text.c_str(), 1) + gap;
         }
-        std::string below = replayEnded ? recomp::i18n::Tr("End of the replay - Esc to leave")
-                            : paused    ? recomp::i18n::Tr("Stopped")
-                                        : std::string();
+        std::string below = viewer.Active() ? std::string()
+                            : replayEnded ? recomp::i18n::Tr("End of the replay - Esc to leave")
+                            : paused      ? recomp::i18n::Tr("Stopped")
+                                          : std::string();
         if (!replayDrift.empty()) {
             below = (below.empty() ? "" : below + " - ") + recomp::i18n::Tr("No longer matches") + " (" + replayDrift.substr(replayDrift.rfind(' ') + 1) + ")";
         }
@@ -1866,6 +1881,14 @@ void Port::Shown(std::vector<uint32_t> &pixels, std::vector<SDL_Rect> *panels, b
         canvas.Text(x, y, 1, 0, {255, 255, 255, 255}, notice.c_str());
         if (panels) {
             panels->push_back({static_cast<int>(x) - 3, static_cast<int>(y) - 2, static_cast<int>(width) + 7, 12});
+        }
+    }
+    // (replay-viewer) The replay's HUD at the bottom: the timeline, the transport, the aids
+    if (replaying && viewer.Active() && !replayTaken && viewer.HudShown(tick)) {
+        const recomp::text::Canvas canvas{px, W, H};
+        viewer.DrawHud(canvas, static_cast<uint32_t>(frame - replayFrom), static_cast<uint32_t>(replaying->info.frames), tick);
+        if (panels) {
+            panels->push_back({0, H - viewer.HudHeight() - 10, W, viewer.HudHeight() + 10});
         }
     }
     if (turned) {
@@ -2324,6 +2347,25 @@ bool Port::StartReplay(std::string &error) {
     if (opt.headless && opt.frames == 0) {
         opt.frames = frame + info.frames;
     }
+    // (replay-viewer) The viewer, its keyframes from the start, the aids this game has
+    replayKeys.clear();
+    {
+        std::vector<uint8_t> start;
+        KeepState(start);
+        replayKeys[0] = std::move(start);
+    }
+    replayTaken = 0;
+    replayTakenState.clear();
+    replayScore.clear();
+    replayScore[0] = {0, 0};
+    replayCountedTo = 0;
+    replayStreak[0] = replayStreak[1] = replayRounds[0] = replayRounds[1] = replayQuiet = 0;
+    replayRoundCounted = replayIn[0] = replayIn[1] = false;
+    viewer.Begin(static_cast<uint32_t>(info.frames));
+    viewerScriptFrom = tick;
+    ReplayAidsShown(true);
+    ViewerAids();
+    viewer.Touched(tick);
     fprintf(stderr, "replay: %s, %s, %s vs %s, %llu frames\n", info.started.c_str(), info.mode.c_str(),
             info.players.empty() ? "?" : info.players[0].c_str(), info.players.size() > 1 ? info.players[1].c_str() : "?",
             static_cast<unsigned long long>(info.frames));
@@ -2341,6 +2383,9 @@ void Port::ReplayInput(uint16_t pressed[]) {
     }
     for (int i = 0; i < Machine::kMaxPlayers && i < 4; i++) {
         pressed[i] = i < replaying->players ? pads[i] : 0;
+        if (i < 2 && (replayTaken >> i) & 1) {
+            pressed[i] = pad[i]; // (replay-viewer: a side taken over plays from here)
+        }
     }
     machine->serviceButton = false;
     machine->testSwitch = false;
@@ -2367,13 +2412,317 @@ void Port::ReplayRan() {
     }
     if (!replayEnded && at >= replaying->info.frames) {
         replayEnded = true;
-        if (!opt.headless) {
+        if (!opt.headless && !viewer.Active()) {
             paused = true; // (the last frame held: Esc leaves)
         }
     }
 }
 
 std::string Port::BuildIdentity() const { return ProgramSha256(); }
+
+// (replay-viewer) This port's board for the viewer: the replay's frames are the port's own frames since it began
+// (frame - replayFrom), each run through RunFrame (the replay's inputs, its checksums, the hash log), seen or not
+namespace {
+class ViewerBoard : public recomp::replay::Board {
+public:
+    explicit ViewerBoard(Port &port) : p(port) {}
+    uint32_t Frame() const override { return static_cast<uint32_t>(p.frame - p.replayFrom); }
+    uint32_t Length() const override { return static_cast<uint32_t>(p.replaying ? p.replaying->info.frames : 0); }
+    void RunFrame(bool seen, bool sound) override {
+        const size_t heard = p.machine->audio.size();
+        p.machine->drawing = seen;
+        p.RunFrame();
+        p.machine->drawing = true;
+        if (!sound) {
+            p.machine->audio.resize(heard);
+        }
+        // (a round's start, the first time the game says one is being fought: a marker on the timeline)
+        const uint32_t at = Frame();
+        if (at > p.replayCountedTo) {
+            p.replayCountedTo = at;
+            p.ReplayScoreFrame(at);
+        }
+        const bool fought = cps2recomp::modes::RoundFought();
+        if (fought && !p.replayFought) {
+            p.viewer.AddMarker(at);
+        }
+        p.replayFought = fought;
+        // (a keyframe every kReplayKeyEvery frames, packed, the first time it is run)
+        if (at % Port::kReplayKeyEvery == 0 && !p.replayKeys.count(at)) {
+            std::vector<uint8_t> state;
+            p.KeepState(state);
+            p.replayKeys[at] = Pack(state);
+        }
+    }
+    void Keep(std::vector<uint8_t> &state, bool lasting) override {
+        p.KeepState(state);
+        if (lasting) {
+            state = Pack(state);
+        }
+    }
+    void PutBack(const std::vector<uint8_t> &state, uint32_t frame) override {
+        p.PutBackState(state.size() > 4 && !memcmp(state.data(), "ZST1", 4) ? Unpack(state) : state);
+        Moved(frame);
+    }
+    void GoBack(uint32_t frame) override {
+        auto it = p.replayKeys.upper_bound(frame);
+        --it; // (the start, 0, is always there)
+        const std::vector<uint8_t> &kept = it->second;
+        p.PutBackState(kept.size() > 4 && !memcmp(kept.data(), "ZST1", 4) ? Unpack(kept) : kept);
+        Moved(it->first);
+    }
+
+private:
+    Port &p;
+    void Moved(uint32_t frame) {
+        p.frame = p.replayFrom + frame;
+        p.machine->audio.clear();
+        // (the replay's checksums: from this frame on; and not over, unless it is at its end)
+        p.replayCheck = 0;
+        p.replayEnded = frame >= Length();
+    }
+    static std::vector<uint8_t> Pack(const std::vector<uint8_t> &raw) {
+        uLongf size = compressBound(static_cast<uLong>(raw.size()));
+        std::vector<uint8_t> out(8 + size);
+        memcpy(out.data(), "ZST1", 4);
+        const uint32_t n = static_cast<uint32_t>(raw.size());
+        memcpy(out.data() + 4, &n, 4);
+        compress2(out.data() + 8, &size, raw.data(), static_cast<uLong>(raw.size()), 1);
+        out.resize(8 + size);
+        return out;
+    }
+    static std::vector<uint8_t> Unpack(const std::vector<uint8_t> &packed) {
+        uint32_t n = 0;
+        memcpy(&n, packed.data() + 4, 4);
+        std::vector<uint8_t> out(n);
+        uLongf size = n;
+        uncompress(out.data(), &size, packed.data() + 8, static_cast<uLong>(packed.size() - 8));
+        return out;
+    }
+};
+} // namespace
+
+bool Port::ViewerTick() {
+    ViewerBoard board(*this);
+    // (--viewer-script: the checks' commands at their ticks of the replay)
+    if (!opt.viewerScript.empty()) {
+        static const struct {
+            const char *name;
+            recomp::replay::Command command;
+        } kNames[] = {{"pause", recomp::replay::Command::Pause}, {"play", recomp::replay::Command::Play},
+                      {"faster", recomp::replay::Command::Faster}, {"rewind", recomp::replay::Command::Rewind},
+                      {"slower", recomp::replay::Command::Slower}, {"normal", recomp::replay::Command::Normal},
+                      {"back", recomp::replay::Command::StepBack}, {"forward", recomp::replay::Command::StepForward},
+                      {"jumpback", recomp::replay::Command::JumpBack}, {"jumpforward", recomp::replay::Command::JumpForward},
+                      {"start", recomp::replay::Command::ToStart}, {"end", recomp::replay::Command::ToEnd},
+                      {"a", recomp::replay::Command::MarkA}, {"b", recomp::replay::Command::MarkB},
+                      {"clear", recomp::replay::Command::ClearLoop}, {"counter", recomp::replay::Command::FrameCounter},
+                      {"pin", recomp::replay::Command::PinHud}, {"hud", recomp::replay::Command::ToggleHud}};
+        const uint64_t at = tick - viewerScriptFrom;
+        size_t from = 0;
+        while (from < opt.viewerScript.size()) {
+            const size_t end = std::min(opt.viewerScript.find(';', from), opt.viewerScript.size());
+            const std::string item = opt.viewerScript.substr(from, end - from);
+            from = end + 1;
+            const size_t colon = item.find(':');
+            if (colon == std::string::npos || strtoull(item.c_str(), nullptr, 10) != at) {
+                continue;
+            }
+            const std::string name = item.substr(colon + 1);
+            if (name.rfind("seek", 0) == 0) {
+                viewer.SeekTo(static_cast<uint32_t>(strtoul(name.c_str() + 4, nullptr, 10)), tick);
+            } else if (name == "aid") {
+                if (!viewer.Aids().empty()) {
+                    viewer.Aids()[0].on = !viewer.Aids()[0].on;
+                    ViewerAidsApply();
+                }
+            } else {
+                for (const auto &one : kNames) {
+                    if (name == one.name) {
+                        viewer.Do(one.command, tick);
+                    }
+                }
+            }
+        }
+    }
+    paused = false; // (the viewer pauses and steps; the port runs what it says)
+    return viewer.Tick(board, tick);
+}
+
+// The players' controls while a replay plays: the viewer's transport, or Start to take a side over
+void Port::ViewerPads() {
+    using recomp::replay::Command;
+    uint16_t pressed[2];
+    for (int p = 0; p < 2; p++) {
+        pressed[p] = static_cast<uint16_t>(pad[p] & ~viewerLast[p]);
+        viewerLast[p] = pad[p];
+    }
+    if (pressed[0] | pressed[1]) {
+        viewer.Touched(tick);
+    }
+    for (int p = 0; p < 2 && p < (replaying ? replaying->players : 0); p++) {
+        if ((pressed[p] & kStart) && !((replayTaken >> p) & 1)) {
+            if (!replayTaken) {
+                KeepState(replayTakenState);
+                replayTakenAt = frame;
+            }
+            replayTaken |= 1u << p;
+            paused = false;
+            notice = std::string("Playing on from the replay as player ") + char('1' + p) + ": the restart key goes back to this moment";
+            noticeUntil = tick + 300;
+            fprintf(stderr, "replay: player %d taken over at frame %llu\n", p + 1, static_cast<unsigned long long>(frame - replayFrom));
+        }
+    }
+    if (replayTaken) {
+        return; // (the controls are the game's now)
+    }
+    const uint16_t any = pressed[0] | pressed[1];
+    const bool paused = viewer.Paused();
+    if (any & kDown) ViewerCommand(Command::PlayPause);
+    if (any & kUp) ViewerCommand(Command::Slower);
+    if (any & kLeft) ViewerCommand(paused ? Command::StepBack : Command::Rewind);
+    if (any & kRight) ViewerCommand(paused ? Command::StepForward : Command::Faster);
+    if (any & kPunch1) ViewerCommand(Command::JumpBack);
+    if (any & kPunch3) ViewerCommand(Command::JumpForward);
+    if (any & kKick1) ViewerCommand(Command::PreviousMarker);
+    if (any & kKick3) ViewerCommand(Command::NextMarker);
+    if (any & kPunch2) ViewerCommand(viewer.A() == recomp::replay::Viewer::kNone || viewer.B() != recomp::replay::Viewer::kNone ? Command::MarkA : Command::MarkB);
+    if (any & kKick2) ViewerCommand(Command::ClearLoop);
+    if (any & kCoin) ViewerCommand(Command::ToggleHud); // (a gamepad's Select / Back: the HUD shown or hidden)
+}
+
+void Port::ViewerCommand(recomp::replay::Command command) {
+    if (!replaying || !viewer.Active()) {
+        return;
+    }
+    viewer.Do(command, tick);
+}
+
+// A click on the picture at (x, y) (its own pixels): true when the replay's HUD took it
+bool Port::ViewerClick(float x, float y) {
+    if (!replaying || !viewer.Active() || replayTaken || !viewer.HudShown(tick)) {
+        return false;
+    }
+    using Hit = recomp::replay::Viewer::Hit;
+    const Hit hit = viewer.HitAt(x, y, ShownWidth(), Video::kHeight, static_cast<uint32_t>(replaying->info.frames));
+    switch (hit.kind) {
+    case Hit::None: return false;
+    case Hit::Do: viewer.Do(hit.command, tick); break;
+    case Hit::Seek: viewer.SeekTo(std::max<uint32_t>(1, hit.frame), tick); break;
+    case Hit::Aid: ViewerAid(hit.aid); break;
+    case Hit::Strip: viewer.Touched(tick); break;
+    }
+    return true;
+}
+
+void Port::ViewerAid(size_t which) {
+    if (which < viewer.Aids().size()) {
+        viewer.Aids()[which].on = !viewer.Aids()[which].on;
+        ViewerAidsApply();
+        viewer.Touched(tick);
+    }
+}
+
+// (replay-names-only) A frame of the replay, run for the first time: the score as Streaks counts it online (a round
+// won when the game says so, once; a match when a side has won its rounds; wins in a row, the loser's back to 0), only
+// once both sides have pressed Start (not a fight against the computer)
+void Port::ReplayScoreFrame(uint32_t at) {
+    for (int p = 0; p < 2; p++) {
+        replayIn[p] = replayIn[p] || (machine->players[p] & kStart);
+    }
+    const int result = battle::RoundResultNow();
+    if (result < 0) {
+        return;
+    }
+    if (result == 0) {
+        if (++replayQuiet >= 60) {
+            replayRoundCounted = false;
+        }
+        return;
+    }
+    replayQuiet = 0;
+    if (replayRoundCounted) {
+        return;
+    }
+    replayRoundCounted = true;
+    if (result == 3 || !replayIn[0] || !replayIn[1]) {
+        return;
+    }
+    const int winner = result - 1;
+    if (++replayRounds[winner] >= battle::RoundsToWin()) {
+        replayStreak[winner]++;
+        replayStreak[1 - winner] = 0;
+        replayRounds[0] = replayRounds[1] = 0;
+        replayScore[at] = {replayStreak[0], replayStreak[1]};
+    }
+}
+
+std::array<int, 2> Port::ReplayScoreAt(uint32_t at) const {
+    auto it = replayScore.upper_bound(at);
+    return it == replayScore.begin() ? std::array<int, 2>{0, 0} : std::prev(it)->second;
+}
+
+void Port::ReplayRestartTaken() {
+    if (!replayTaken || replayTakenState.empty()) {
+        return;
+    }
+    PutBackState(replayTakenState);
+    frame = replayTakenAt;
+    machine->audio.clear();
+}
+
+// The aids this game can draw while a replay plays: those of its features that only show things
+void Port::ViewerAids() {
+    static const struct {
+        const char *name, *label;
+    } kAids[] = {{"hit_boxes", "HITBOX"}, {"input_display", "INPUT"}};
+    if (!viewer.Aids().empty()) {
+        ViewerAidsApply();
+        return;
+    }
+    for (const auto &aid : kAids) {
+        for (const auto &feature : TheGame().features) {
+            if (!strcmp(feature.name, aid.name)) {
+                viewer.Aids().push_back({aid.name, aid.label, FeatureOn(aid.name)});
+            }
+        }
+    }
+}
+
+void Port::ViewerAidsApply() {
+    for (const auto &aid : viewer.Aids()) {
+        SetFeatureForNow(aid.name.c_str(), aid.on ? 1 : 0);
+    }
+}
+
+// While a replay is watched, the training aids that only show things (hit boxes, the input display, frame data and
+// the readouts) work outside a training session too: they lose their training mark for the while (the runtime's list
+// of aids made again, every feature's value as it was). In the port, not the runtime: the runtime's sources are the
+// replays' gameplay identity (replay_identity.txt), which this must not change.
+void Port::ReplayAidsShown(bool watching) {
+    static const std::set<std::string> kShown = {"damage_readout", "input_display", "frame_data", "frame_meter", "hit_boxes",
+                                                 "stun_readout", "throw_range"};
+    if (watching == !replayAidsMarked.empty()) {
+        return;
+    }
+    std::map<std::string, int> values;
+    for (Feature &feature : TheGame().features) {
+        values[feature.name] = FeatureSetting(feature.name);
+        if (watching && kShown.count(feature.name) && (feature.flags & kFeatureTraining)) {
+            feature.flags &= ~kFeatureTraining;
+            replayAidsMarked.insert(feature.name);
+        } else if (!watching && replayAidsMarked.count(feature.name)) {
+            feature.flags |= kFeatureTraining;
+        }
+    }
+    if (!watching) {
+        replayAidsMarked.clear();
+    }
+    LoadFeatures(SettingsPath(), "");
+    for (const auto &value : values) {
+        SetFeatureForNow(value.first.c_str(), value.second);
+    }
+}
 
 bool Port::RecordInputTo(const std::string &path, std::string &error) {
     if (net || gekkoOnline) { error = "Not while playing online."; return false; }
@@ -2410,6 +2759,10 @@ void Port::StopReplay() {
     if (replaying) {
         // (the frame stays as the replay left it; the players' controls from here, and nothing recorded until a reset)
         replaying.reset();
+        viewer.End();
+        ReplayAidsShown(false);
+        replayKeys.clear();
+        replayTaken = 0;
         opt.replayPlay.clear();
         replayDrift.clear();
         replayEnded = false;
@@ -3703,6 +4056,12 @@ void Port::Finish() {
         fprintf(stderr, "replay: %s; %zu of %zu checkpoints matched%s\n", replayEnded ? "played to its end" : "left before its end",
                 replayMatched, replaying->checks.size(), replayDrift.empty() ? "" : (", " + replayDrift).c_str());
     }
+    if (!replayKeys.empty()) {
+        // (replay-viewer: what its keyframes take)
+        size_t bytes = 0;
+        for (const auto &key : replayKeys) bytes += key.second.size();
+        fprintf(stderr, "replay: %zu keyframes, %zu KB\n", replayKeys.size(), bytes / 1024);
+    }
     if (!replayNote.empty()) {
         fprintf(stderr, "%s\n", replayNote.c_str());
     }
@@ -4163,6 +4522,9 @@ bool ParseArgs(int argc, char **argv, port::Options &o) {
             o.recordInputAt = next();
         } else if (a == "--play-input-at") {
             o.playInputAt = next();
+        } else if (a == "--viewer-script") {
+            // (replay-viewer, the checks) TICK:COMMAND;... : the viewer's commands at those ticks of a replay
+            o.viewerScript = next();
         } else if (a == "--stop-replay-at") {
             o.stopReplayAt = strtoull(next(), nullptr, 10);
         } else if (a == "--stats") {

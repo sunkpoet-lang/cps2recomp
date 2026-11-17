@@ -20,11 +20,13 @@
 #include <deque>
 #include <filesystem>
 #include <map>
+#include <set>
 #include <memory>
 #include <string>
 #include <vector>
 
 #include "replay.h"
+#include "../recomp-common/replay_viewer.h" // (replay-viewer)
 
 namespace port {
 
@@ -39,6 +41,7 @@ struct Options {
     std::string hashLog;       // per-frame state hash log
     std::string replayFolder;  // (this fork, native-replays) --replay-folder DIR: each session saved there as a .fareplay (none: nothing recorded)
     std::string replayPlay;    // --replay FILE: a .fareplay played back
+    std::string viewerScript;  // (replay-viewer) --viewer-script TICK:COMMAND;...: the viewer worked by the checks
     std::string recordEntries; // entries file to add to (tools/recomp.py reads it)
     std::string dumpProgram;   // write the deciphered program here and stop
     std::string audioDump;     // WAV file of the sound (headless)
@@ -387,6 +390,38 @@ struct Port {
     bool StartReplay(std::string &error);
     void ReplayInput(uint16_t pressed[]);
     void ReplayRan();
+    // (replay-viewer) Watching it: the shared viewer (recomp-common/replay_viewer.h) works this port's board through
+    // ViewerBoard (main.cpp): a frame of the replay run seen or unseen, states kept and put back, and keyframes every
+    // kReplayKeyEvery frames (packed) to go back to. The players' controls are the viewer's while it plays
+    // (ViewerPads), but for a side taken over with its Start: then that side plays from that frame, against what the
+    // other did, and the restart key goes back to it (replayTakenState)
+    static constexpr uint32_t kReplayKeyEvery = 300;
+    recomp::replay::Viewer viewer;
+    std::map<uint32_t, std::vector<uint8_t>> replayKeys; // (the replay's frame -> its state, packed; 0: the start)
+    uint16_t viewerLast[2] = {0xFFFF, 0xFFFF};
+    uint64_t viewerScriptFrom = 0; // (--viewer-script's ticks count from the replay's start)
+    unsigned replayTaken = 0;            // (bits: the sides taken over)
+    bool replayFought = false;           // (a round was being fought at the last frame run: the round markers)
+    // (replay-names-only) The score as the online strip counts it (matches won in a row, Streaks), counted the first
+    // time each frame of the replay is run, and kept by frame: going back and forth shows the score at that point
+    std::map<uint32_t, std::array<int, 2>> replayScore;
+    uint32_t replayCountedTo = 0;
+    int replayStreak[2] = {}, replayRounds[2] = {}, replayQuiet = 0;
+    bool replayRoundCounted = false, replayIn[2] = {};
+    void ReplayScoreFrame(uint32_t at);
+    std::array<int, 2> ReplayScoreAt(uint32_t at) const;
+    std::vector<uint8_t> replayTakenState;
+    uint64_t replayTakenAt = 0;
+    bool ViewerTick();
+    void ViewerPads();
+    void ViewerCommand(recomp::replay::Command command); // (Game > Replay's entries, the keys)
+    void ViewerAids();   // (the aids this game can draw, offered on the HUD)
+    void ViewerAidsApply();
+    void ReplayRestartTaken();
+    bool ViewerClick(float x, float y); // (a click on the picture, in its pixels: the HUD's)
+    void ViewerAid(size_t which);       // (an aid switched: hit boxes, the input display)
+    void ReplayAidsShown(bool watching);
+    std::set<std::string> replayAidsMarked; // (the aids that lost their training mark while a replay is watched)
     // (replay-compatibility 7) The Game menu's Replay submenu. RecordInput saves the automatic recording and begins one
     // at this frame, saved under the chosen name (manualPath) when it is stopped; PlayInput plays a replay in place, as
     // --replay does; StopReplay ends either: a replay's frame stays and the controls are the players' from it (nothing
