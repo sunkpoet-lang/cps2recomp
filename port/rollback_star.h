@@ -32,7 +32,7 @@ class StarRoom {
     struct Transfer {uint64_t transaction;MembershipJournal journal;};
     std::array<std::optional<Transfer>,4>journals_{};
 public:
-    // (multiplayer-online 3.1b) The roster a membership transition proposes: who owns each seat, and its names.
+    // The roster a membership transition proposes: who owns each seat, and its names.
     // Nothing of it routes game data until PublishPending, after the transition's commit.
     struct PendingRoster {uint64_t id=0;uint8_t filled=0;std::array<uint8_t,4>owners{255,255,255,255};std::array<std::string,4>names{};int joining=-1,leaving=-1;};
 private:

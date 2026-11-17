@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// (multiplayer-online, 16 November 2026) A backend-neutral seat match: the host-star room, an N-player rollback
+// A backend-neutral seat match: the host-star room, an N-player rollback
 // session and membership transitions (a PC joining or leaving during the match, a lone host waiting), for any board
 // that can save and load its own state, run one frame with 2-4 input lanes and give a semantic hash of its state.
 // The CPS port's Online has the same cycle for its own board; Sunset Riders is the first backend that uses this one.
 //
-// Rules kept from the CPS path (multiplayer-online design and membership-epoch-plan):
+// Rules kept from the CPS path:
 // - a PC never loads another PC's state: a joining PC rebuilds the transition's frame from its own start and the
 //   confirmed inputs, and every other PC loads its own checkpoint of that frame;
 // - nothing of a proposed roster routes game data before the transition's commit;
@@ -167,6 +167,17 @@ public:
     net::StarRoom *Room() const { return star_.get(); }
     GekkoSession *Session() const { return session_ ? session_.Get() : nullptr; }
     unsigned RecordingBase() const { return recordingBase_; }
+    // Every confirmed input of the match from its global frame 0, lanes interleaved (a replay of the whole match:
+    // the sessions before this one, then this one's confirmed frames). Before Stop.
+    bool ConfirmedHistory(std::vector<uint16_t> &out) {
+        if (!session_) { out = history_; return history_.size() == size_t(base_) * o_.capacity; }
+        if (!recordingBase_) return false;
+        unsigned length = 0; const auto *data = gekko_peek_recording(session_.Get(), &length); if (!data) return false;
+        const auto confirmed = net::ConfirmedRecording(std::span<const uint8_t>(data, length), recordingBase_, o_.capacity);
+        return ConfirmedPrefix(base_ + confirmed.size() / (o_.capacity * sizeof(uint16_t)), out);
+    }
+    // (how far this PC runs ahead of the others: a window slows a little when over one frame)
+    float FramesAhead() const { return session_ && status_ == Status::Playing ? gekko_frames_ahead(session_.Get()) : 0.0f; }
 
 private:
     using ull = unsigned long long;
