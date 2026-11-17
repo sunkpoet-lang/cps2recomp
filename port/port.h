@@ -341,7 +341,7 @@ struct Port {
     uint64_t againAt = 0; // (joining: the tick to try again at)
     // (this fork) GekkoNet online (online.h): one frame of the session with both players' controls, through Step;
     // `gekkoOnline` turns off stopping, slowing, save states, reset, the modes and the custom soundtrack
-    void RunOnlineFrame(const uint16_t players[2], bool again);
+    bool RunOnlineFrame(std::span<const uint16_t> players, bool again);
     // ... the input part of a frame: pad[] from the movie or the made-up play (the window sets it itself)
     void GatherInput();
     bool gekkoOnline = false, gekkoArcadeWaiting = false;
@@ -367,6 +367,7 @@ struct Port {
     // A replay begun with what every one says (the game, its build, the date, the options) and the state now; and one
     // saved in the replay folder under its name (replayNote: what became of it)
     std::unique_ptr<Replay> NewReplay(const char *mode);
+    std::string BuildIdentity() const;
     void SaveReplay(Replay &replay);
     // (the save state's bytes, as SaveState writes them, and put back)
     std::vector<uint8_t> StateBytes();

@@ -24,7 +24,14 @@
 #pragma once
 
 #include "match_flow.h"
+#include "rollback_session_owner.h"
+#include "player_inputs.h"
+#include "rollback_star.h"
+#include "seat_match.h"
+#include "membership_checkpoints.h"
+#include "membership_bootstrap.h"
 #include "recovery.h"
+#include "rollback_transport.h"
 #include "replay.h"
 #include <cstdint>
 #include <cstdio>
@@ -51,6 +58,11 @@ struct OnlineOptions {
     std::string host;     // --join's address
     int delay = 1;
     std::string name;     // (this fork) --nick: this player's name, said in the hello (ForkAde's in-game chat)
+    unsigned localPlayers = 1; // only for experimental seat rooms
+    unsigned startPlayers = 0; // experimental initial threshold; zero waits for capacity
+    bool epochs = false; // experimental epoch-framed seats
+    bool lateJoins = false; // (multiplayer-online 3.1b) the host admits players during the match, and lets them leave
+    bool seats = false; // experimental initial N-player host-star path
     bool matchFlow = false, arcadeWait = false; // explicit ForkAde presentation/solo wait; no wire change
     std::string checkpointLog; // save-event frame and board fingerprint only
     std::string flowLog; // optional save-event presentation counters; no game state bytes
@@ -77,7 +89,7 @@ public:
     bool Start(Port &port, const OnlineOptions &options, std::string &error);
     // One tick (a frame's time): the local player's controls (the stress session: both players'); the session's
     // frames are run on the port's board. Returns how many frames were run that are to be seen (0 or more).
-    int Tick(const uint16_t local[2], bool advanceWaiting = true);
+    int Tick(std::span<const uint16_t> local, bool advanceWaiting = true);
     bool ArcadeWaiting() const { return m_options.arcadeWait && m_options.mode == OnlineOptions::Mode::Host && !m_heard && m_status != Status::Ended; }
     Status GetStatus() const {
         return m_status;
@@ -110,7 +122,7 @@ public:
     bool ChatSpectating() const override { return Spectating(); }
 
     // (the adapter's, for GekkoNet's callbacks)
-    struct Socket;
+    using Socket = recomp::net::PacketSocket;
 
     // (this fork) How many spectators are watching (the host's), and whether this side is one
     int Watching() const;
@@ -129,16 +141,22 @@ private:
     bool CreateSpectateSession();
     void UpdateFlowMessage();
     bool CreateGameSession();
+    // (multiplayer-online 3.2) A seat room is the shared seat match (seat_match.h) with this port's board: its state,
+    // its frames, its replay per session and the match's presentation
+    bool StartSeats(Port &port, const OnlineOptions &options, std::string &error);
+    int TickSeats(std::span<const uint16_t> local);
+    recomp::net::StarRoom *Star() const { return m_seats ? m_seats->Room() : nullptr; }
+    GekkoSession *ReplaySession() const { return m_seats ? m_seats->Session() : m_session.Get(); }
     // (this fork, native-replays) The replay of this GekkoNet session (--replay-folder): GekkoNet records the session's
     // confirmed inputs; ReplayAdvance keeps the state it began from, each frame's inputs as it was last run and the
     // checksums every 60 frames; ReplayEnd takes the confirmed inputs, keeps the frames whose last run had them, and
     // saves it (before the session goes: the match ended, left, or a reconnection's new start)
     std::unique_ptr<Replay> m_replay;
-    std::vector<uint32_t> m_replayRan;          // (GekkoNet's frame -> both players' inputs as last run)
+    std::vector<Replay::Pads> m_replayRan;          // (GekkoNet's frame -> every seat's inputs as last run)
     std::map<uint64_t, uint32_t> m_replayChecks; // (frames run -> the checksum then)
     unsigned int m_replayBase = 0;               // (the recording's length with no frame in it)
     void ReplayBegin();
-    void ReplayAdvance(int frame, const uint16_t players[2], bool before);
+    void ReplayAdvance(int frame, const Replay::Pads& players, bool before);
     void ReplayEnd();
     void SendControl(char kind,uint64_t epoch);
     void PrepareRecovery();
@@ -158,11 +176,16 @@ private:
 
     Port *m_port = nullptr;
     OnlineOptions m_options;
-    GekkoSession *m_session = nullptr;
+    recomp::rollback::Session m_session;
     Socket *m_socket = nullptr;
+    std::unique_ptr<recomp::match::SeatMatch> m_seats;
+    size_t m_replayCap = SIZE_MAX;       // (a session ended by a transition: its replay up to the transition's frame)
+    bool m_flowStarted = false;          // (4.1: the seats' presentation flow began; transitions keep it)
     Status m_status = Status::Waiting;
     bool m_failed = false;
     std::string m_message;
+    unsigned m_players = 2; // stress uses game.cfg; paired wire stays two until seat negotiation
+    std::array<int, 4> m_actors{-1,-1,-1,-1};
     int m_local = 0, m_remote = 1; // the players' handles in the session
     std::vector<uint8_t> m_hello;  // what this side says hello with
     bool m_heard = false;          // the other side's hello has come, and it is the same game

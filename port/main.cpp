@@ -1654,7 +1654,7 @@ void Port::Shown(std::vector<uint32_t> &pixels, std::vector<SDL_Rect> *panels, b
     // (online, this fork's online-hud: the players' names and win streaks in one strip at the top, over the score row
     // and above the life bars and the timer, see-through as Fightcade's: "Name1  N  VS  M  Name2", the streaks in the
     // fighting games only; Tab hides it)
-    const bool forkadeNames = gekkoOnline && (opt.gekko.matchFlow || opt.gekko.mode == OnlineOptions::Mode::Watch) && Match() &&
+    const bool forkadeNames = gekkoOnline && (opt.gekko.matchFlow || opt.gekko.mode == OnlineOptions::Mode::Watch || opt.gekko.seats) && Match() &&
         Match()->ReadMatch().phase == MatchView::Phase::Playing;
     if (((net && !connecting) || forkadeNames) && !onlineOverlayHidden) {
         const MatchView match = Match()->ReadMatch();
@@ -1675,8 +1675,17 @@ void Port::Shown(std::vector<uint32_t> &pixels, std::vector<SDL_Rect> *panels, b
         };
         // (online-hud-palette: player 1 blue, player 2 red, the numbers white, VS grey, on the see-through band)
         using recomp::text::Palette;
-        const bool names = !FeatureOn("online_hide_names"), streaks = battle::RoundResultNow() >= 0;
+        const bool names = !FeatureOn("online_hide_names"), streaks = match.players == 2 && battle::RoundResultNow() >= 0;
         std::vector<Part> parts;
+        if (match.players > 2) {
+            // (multiplayer-online 4.1) More than two: every seat's name in its player's colour; no
+            // streaks (a co-op game counts no wins). An empty seat is left out.
+            static constexpr recomp::text::Color kSeat[4] = {Palette::kPlayer1, Palette::kPlayer2, {110, 220, 120, 255}, {255, 205, 80, 255}};
+            for (int seat = 0; seat < match.players && seat < 4; ++seat) {
+                if (!names || match.names[seat].empty()) continue;
+                parts.push_back({cut(match.names[seat]), kSeat[seat]});
+            }
+        } else {
         if (names && !match.names[0].empty()) {
             parts.push_back({cut(match.names[0]), Palette::kPlayer1});
         }
@@ -1689,6 +1698,7 @@ void Port::Shown(std::vector<uint32_t> &pixels, std::vector<SDL_Rect> *panels, b
         }
         if (names && !match.names[1].empty()) {
             parts.push_back({cut(match.names[1]), Palette::kPlayer2});
+        }
         }
         if (parts.size() > 1) {
             const float gap = recomp::text::TextWidth("  ", 1);
@@ -2167,6 +2177,7 @@ void Port::RecordInput(const uint16_t pressed[]) {
     if (!recording) {
         recording = NewReplay("local");
         recording->info.players = {opt.nick.empty() ? "Player 1" : opt.nick, "Player 2"};
+        for (int seat=2;seat<recording->players;++seat) recording->info.players.push_back("Player "+std::to_string(seat+1));
         recordFrom = frame;
         recordFeatures = FeatureSnapshot();
     }
@@ -2289,10 +2300,15 @@ void Port::ReplayRan() {
     }
 }
 
+std::string Port::BuildIdentity() const { return ProgramSha256(); }
+
 std::unique_ptr<Replay> Port::NewReplay(const char *mode) {
     auto replay = std::make_unique<Replay>();
     replay->state = StateBytes();
     replay->players = 2;
+#ifdef GAME_PLAYERS
+    if (!std::strcmp(mode,"local")) replay->players = std::clamp(std::atoi(GAME_PLAYERS),2,4);
+#endif
     Replay::Info &info = replay->info;
     info.game = GAME_ID;
     info.title = GAME_NAME;
@@ -3284,20 +3300,19 @@ void Port::GatherInput() {
 // (this fork) GekkoNet online (online.h): one frame of the session, with both players' controls as they were, through
 // Step, and nothing of this side's own (no run-ahead, movie or test switch). A frame run `again` (a rollback's, or run
 // ahead) is not drawn and not counted, as Tommy's netplay does (Netplay::Run): only the frames seen move `frame` on.
-void Port::RunOnlineFrame(const uint16_t players[2], bool again) {
+bool Port::RunOnlineFrame(std::span<const uint16_t> players, bool again) {
     ClearSpareRan();
     SoundtrackFollow();
     machine->SetBoardTiming(FeatureOn("arcade_timing"));
     uint16_t all[Machine::kMaxPlayers] = {};
-    all[0] = players[0];
-    all[1] = players[1];
+    if (!recomp::rollback::BoardInputs(players, all)) return false;
     machine->serviceButton = false;
     machine->testSwitch = false;
     machine->drawing = !again;
     Step(all);
     machine->drawing = true;
     if (again) {
-        return;
+        return true;
     }
     frame++;
     if (hashFile) {
@@ -3311,6 +3326,7 @@ void Port::RunOnlineFrame(const uint16_t players[2], bool again) {
         Shown(shown);
         WritePng(shot, shown.data(), ShownWidth(), Video::kHeight);
     }
+    return true;
 }
 
 void Port::RunFrame() {
@@ -3709,6 +3725,11 @@ void Usage() {
             "  --eeprom FILE          where the board's settings memory is kept\n"
             "  --gekko-host [PORT]    (this fork) GekkoNet online, player 1, waiting on that UDP port (7845); --gekko-join\n"
             "                         HOST:PORT, player 2;\n"
+            "  --gekko-locals 1|2     local controllers at this PC (with --gekko-seats)\n"
+            "  --gekko-start-players N experimental initial threshold (2-4); requires epochs\n"
+            "  --gekko-epochs         experimental epoch-framed seats\n"
+            "  --gekko-late-joins     (host, with epochs) players join and leave during the match\n"
+            "  --gekko-seats          experimental headless seats/host relay (no arcade flow or spectators yet)\n"
             "  --gekko-delay N        ... the local controls N frames late (1); --gekko-stress: rollback every frame (online.h)\n"
             "  --gekko-watch HOST:PORT  (this fork) watch that host's match; --gekko-spectators N: how many may watch the\n"
             "                         host's (6; 0 none); --gekko-spectator-delay N: frames a spectator stays behind (15);\n"
@@ -4029,6 +4050,16 @@ bool ParseArgs(int argc, char **argv, port::Options &o) {
             o.gekko.matchFlow = true;
         } else if (a == "--gekko-delay") {
             o.gekko.delay = atoi(next());
+        } else if (a == "--gekko-locals") {
+            const std::string value=next();o.gekko.localPlayers=value=="1"?1:value=="2"?2:0;
+        } else if (a == "--gekko-start-players") {
+            const std::string value=next();o.gekko.startPlayers=value=="2"?2:value=="3"?3:value=="4"?4:255;
+        } else if (a == "--gekko-epochs") {
+            o.gekko.epochs = true;
+        } else if (a == "--gekko-late-joins") {
+            o.gekko.lateJoins = true;
+        } else if (a == "--gekko-seats") {
+            o.gekko.seats = true;
         } else if (a == "--gekko-stress") {
             o.gekko.mode = port::OnlineOptions::Mode::Stress;
         } else if (a == "--list-features") {
@@ -4262,7 +4293,7 @@ int main(int argc, char **argv) {
                 p.frame = shown; // (the movie and the made-up play go by the frames seen)
             }
             p.GatherInput();
-            const uint16_t local[2] = {p.pad[0], stress ? p.pad[1] : uint16_t{0}};
+            const uint16_t local[4] = {p.pad[0], (stress || (p.opt.gekko.seats && p.opt.gekko.localPlayers==2)) ? p.pad[1] : uint16_t{0}, stress ? p.pad[2] : uint16_t{0}, stress ? p.pad[3] : uint16_t{0}};
             const bool wasArcade=online.ArcadeWaiting();
             const int seen = online.Tick(local);
             if(wasArcade&&!online.ArcadeWaiting())shown=0;

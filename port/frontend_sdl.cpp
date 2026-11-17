@@ -1421,7 +1421,7 @@ int RunWindowed(Port &port) {
             if (isOnline) {
                 // (online, the game goes on behind the menu, as behind the in-game menu: this side's controls let go,
                 // unheard; the picture shown is the one the menu opened on)
-                const uint16_t none[2] = {};
+                const uint16_t none[4] = {};
                 onlineOwner->Tick(none,false);
                 port.machine->audio.clear();
                 paceFrame();
@@ -1443,7 +1443,7 @@ int RunWindowed(Port &port) {
             presenter.Show(menuPicture.data(), static_cast<int>(menuWidth), static_cast<int>(menuHeight), menuWhere, nullptr, false);
             if (isOnline) {
                 // (online, the game goes on behind the menu, with this side's controls let go, unheard)
-                const uint16_t none[2] = {};
+                const uint16_t none[4] = {};
                 onlineOwner->Tick(none,false);
                 port.machine->audio.clear();
                 paceFrame();
@@ -1461,8 +1461,8 @@ int RunWindowed(Port &port) {
         if (isOnline) {
             // (this side's player: the keyboard's players' keys and the gamepads together; the stress test's two)
             const bool stress = port.opt.gekko.mode == OnlineOptions::Mode::Stress;
-            const uint16_t local[2] = {static_cast<uint16_t>(stress ? port.pad[0] : port.pad[0] | port.pad[1]),
-                                       stress ? port.pad[1] : uint16_t{0}};
+            const uint16_t local[4] = {static_cast<uint16_t>(stress ? port.pad[0] : port.pad[0] | port.pad[1]),
+                                       stress ? port.pad[1] : uint16_t{0}, stress ? port.pad[2] : uint16_t{0}, stress ? port.pad[3] : uint16_t{0}};
             ran = onlineOwner->Tick(local) > 0;
         } else {
             ran = port.Tick();

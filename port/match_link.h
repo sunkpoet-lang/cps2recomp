@@ -16,7 +16,8 @@ struct MatchView {
     int local = 0, ping = 0, delay = 0;
     // Unknown is distinct from a peer that was just heard: not every transport exposes it.
     std::optional<uint64_t> silentMs;
-    std::array<std::string, 2> names;
+    std::array<std::string, 4> names; // (multiplayer-online 4.1: one per seat; a two-player match uses the first two)
+    int players = 2;                   // the match's seats
     std::string message, code, invited, invitation, stats;
     // (this fork, online-hud) The readout's values one by one, for its rows: the last rollback's frames (-1: not
     // known), how many watch, and whether this side is a spectator; stress: the stress test's own line, as stats
